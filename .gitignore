@@ -1,0 +1,43 @@
+# Ignore all image/media files
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tiff
+*.ico
+*.svg
+*.webp
+*.mp4
+*.mp3
+*.wav
+*.ogg
+*.flac
+*.avi
+*.mov
+*.mkv
+*.webm
+
+# Ignore Visual Studio folders
+**/.vs/
+
+# Ignore VS Code folders
+**/.vscode/
+
+# Ignore all build folders
+**/build/
+**/out/
+
+# Ignore common IDE or OS-specific files
+.DS_Store
+Thumbs.db
+
+# Ignore ONNX Models and TRT Plans
+**/onnx-models.zip
+**/TRT-Plans/
+
+# Ignore log files
+**/.log
+
+# Ignore movie_effect
+**/movie_effect/
