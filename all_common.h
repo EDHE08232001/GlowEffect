@@ -1,15 +1,15 @@
 /*******************************************************************************************************************
-* FILE NAME   :    all_common.h
-*
-* PROJECTION  :    general c++ lib for video processing
-*
-* DESCRIPTION :    common included headers
-*
-* VERSION HISTORY
-* YYYY/MMM/DD      Author          Comments
-* 2020 JUL 08      Yu Liu          Creation
-*
-********************************************************************************************************************/
+ * FILE NAME   :    all_common.h
+ *
+ * PROJECTION  :    general c++ lib for video processing
+ *
+ * DESCRIPTION :    common included headers
+ *
+ * VERSION HISTORY
+ * YYYY/MMM/DD      Author          Comments
+ * 2020 JUL 08      Yu Liu          Creation
+ *
+ ********************************************************************************************************************/
 #pragma once
 
 // libraries
@@ -33,7 +33,6 @@
 #include <atomic>
 #include <queue>
 #include <map>
-
 
 // defines
 #define F_PI    3.14159265359f
@@ -60,5 +59,9 @@ typedef unsigned char   uchar;
 typedef unsigned short  ushort;
 typedef unsigned int    uint;
 
-// 声明全局变量
+// Global Variables
 extern int mipmap_level;
+extern int param_KeyLevel;
+extern int param_KeyScale;
+extern int default_scale;
+extern int button_id;

@@ -20,6 +20,8 @@
 #include "glow_effect.hpp"
 #include <exception>
 #include <filesystem>
+#include <thread>
+#include <mutex>
 
 void set_control(void);
 
@@ -27,6 +29,9 @@ void set_control(void);
 cv::Mat current_original_img;
 cv::Mat current_grayscale_mask;
 std::string current_image_path;
+
+// Mutex Setup
+std::mutex state_mutex;
 
 /**
  * Updates the current image with the glow effect using the loaded mask.
@@ -45,8 +50,9 @@ void updateImage() {
 /**
  * Callback for Key Level slider updates.
  */
-static void bar_key_level_cb(int pos, void* user_data) {
-	param_KeyLevel = pos;
+void bar_key_level_cb(int newValue) {
+	std::lock_guard<std::mutex> lock(state_mutex);
+	param_KeyLevel = newValue;
 	std::cout << "Key Level updated to: " << param_KeyLevel << std::endl;
 	updateImage();
 }
@@ -54,17 +60,18 @@ static void bar_key_level_cb(int pos, void* user_data) {
 /**
  * Callback for Key Scale slider updates.
  */
-static void bar_key_scale_cb(int pos, void* user_data) {
-	param_KeyScale = pos;
+void bar_key_scale_cb(int newValue) {
+	std::lock_guard<std::mutex> lock(state_mutex);
+	param_KeyScale = newValue;
 	std::cout << "Key Scale updated to: " << param_KeyScale << std::endl;
 	updateImage();
 }
-
 /**
  * Callback for Default Scale slider updates.
  */
-static void bar_default_scale_cb(int pos, void* user_data) {
-	default_scale = pos;
+void bar_default_scale_cb(int newValue) {
+	std::lock_guard<std::mutex> lock(state_mutex);
+	default_scale = newValue;
 	std::cout << "Default Scale updated to: " << default_scale << std::endl;
 	updateImage();
 }
@@ -83,7 +90,9 @@ int main() {
 		};
 
 		usage();
-		set_control();
+
+		// Launch GUI in a separate thread
+		std::thread guiThread(set_control);
 
 		std::string planFilePath = "D:/csi4900/TRT-Plans/mobileone_s4.edhe.plan";
 		std::string userInput;
@@ -254,6 +263,9 @@ int main() {
 			printf("Invalid input. Terminating the program.\n");
 			return 0;
 		}
+
+		// Wait for GUI thread to finish before existing
+		guiThread.join();
 	}
 	catch (const std::exception& e) {
 		std::cerr << "Unexpected error occurred: " << e.what() << std::endl;

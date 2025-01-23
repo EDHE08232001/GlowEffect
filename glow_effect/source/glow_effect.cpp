@@ -92,8 +92,7 @@ void glow_blow(const cv::Mat& mask, cv::Mat& dst_rgba, int param_KeyLevel, int D
 	}
 
 	// Print the result of the operation.
-	std::cout << "glow_blow completed. Target region "
-		<< (has_target_region ? "found and applied." : "not found.") << std::endl;
+	std::cout << "glow_blow completed. Target region " << (has_target_region ? "found and applied." : "not found.") << std::endl;
 }
 
 

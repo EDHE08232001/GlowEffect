@@ -590,7 +590,7 @@ void TRTInference::measure_trt_performance(const string& trt_plan, const string&
 
 
     try {
-        cv::imwrite("./pngOutput/trt_output.png", clipped_image_data);
+        cv::imwrite("pngOutput/trt_output.png", clipped_image_data); // custom path
         cout << "Saved IMG: trt_output" << endl;
         
         cv::Mat original_image = cv::imread(original_image_path);

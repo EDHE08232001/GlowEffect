@@ -27,6 +27,7 @@
 # Ignore all build folders
 **/build/
 **/out/
+**/x64/
 
 # Ignore common IDE or OS-specific files
 .DS_Store

@@ -34,6 +34,9 @@
     <ClCompile Include="source\TRTInference.cpp">
       <Filter>Source Files\cref code</Filter>
     </ClCompile>
+    <ClCompile Include="source\wx_gui.cpp">
+      <Filter>Source Files\cref code</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\gaussian_blur.hpp">
@@ -43,6 +46,15 @@
       <Filter>Include Files</Filter>
     </ClInclude>
     <ClInclude Include="resource.h" />
+    <ClInclude Include="source\glow_effect.hpp">
+      <Filter>Include Files</Filter>
+    </ClInclude>
+    <ClInclude Include="source\wx_gui.h">
+      <Filter>Include Files</Filter>
+    </ClInclude>
+    <ClInclude Include="source\all_main.h">
+      <Filter>Include Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="source_cu\mipmap_short.cu">
