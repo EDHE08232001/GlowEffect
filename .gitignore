@@ -39,6 +39,3 @@ Thumbs.db
 
 # Ignore log files
 **/.log
-
-# Ignore movie_effect
-**/movie_effect/
