@@ -33,6 +33,9 @@ std::string current_image_path;
 // Mutex Setup
 std::mutex state_mutex;
 
+// Callback Functions For GUI
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 /**
  * Updates the current image with the glow effect using the loaded mask.
  */
@@ -75,6 +78,8 @@ void bar_default_scale_cb(int newValue) {
 	std::cout << "Default Scale updated to: " << default_scale << std::endl;
 	updateImage();
 }
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 int main() {
 	try {

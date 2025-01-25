@@ -196,7 +196,7 @@ void TRTInference::measure_segmentation_trt_performance(const string& trt_plan, 
     try {
         ///////////////////////////////////////////////////////////////////
         cv::imwrite("pngOutput/trt_seg_output_scaled.png", cv_img);        // use your own path
-        /// //////////////////////////////////////////////////////////////
+        //////////////////////////////////////////////////////////////////
 
         cout << "Saved IMG: trt_seg_output_scaled" << endl; 
     } catch (const cv::Exception& ex) {

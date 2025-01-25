@@ -11,7 +11,7 @@
  * @return true if initialization is successful; false otherwise.
  */
 bool MyApp::OnInit() {
-	MainFrame* frame = new MainFrame("Stylish GUI with wxWidgets");
+	MainFrame* frame = new MainFrame("Glow Effect GUI");
 	frame->Show(true); // Display the main frame
 	return true;
 }
@@ -165,7 +165,6 @@ void MainFrame::OnButtonClicked(wxCommandEvent& event) {
 		if (event.GetEventObject() == buttons[i]) {
 			button_id = i; // Update the selected button index atomically
 			UpdateButtonAppearance(i); // Update button appearance
-			std::clog << "Button " << i << " clicked." << std::endl;
 			break;
 		}
 	}
