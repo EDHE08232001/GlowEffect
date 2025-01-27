@@ -79,8 +79,8 @@
     <LibraryPath>$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <IncludePath>D:\csi4900\GlowEffect\glow_effect\include;D:\csi4900\GlowEffect\movie_effect\common\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\include;$(WindowsSDK_IncludePath)</IncludePath>
-    <LibraryPath>C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\lib\x64;C:\Program Files\NVIDIA\TensorRT-8.5.3.1\lib;$(LibraryPath)</LibraryPath>
+    <IncludePath>D:\csi4900\glow_mipmap\glow_effect\include;D:\csi4900\glow_mipmap\movie_effect\common\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\include;$(WindowsSDK_IncludePath)</IncludePath>
+    <LibraryPath>C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\lib\x64;C:\Program Files\TensorRT-8.5.3.1\lib;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
@@ -114,9 +114,9 @@
       <Optimization>MaxSpeed</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <PreprocessorDefinitions>WIN32;WIN64;NDEBUG;_CONSOLE;_CRT_SECURE_NO_WARNINGS;_UNICODE;UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>C:\Program Files\NVIDIA\TensorRT-8.5.3.1\include;C:\Program Files\NVIDIA\CUDNN\v8.9.7\include;C:\Program Files\NVIDIA Corporation\NvToolsExt\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\include;C:\DevelopmentTools\OpenCV\install\include;C:\DevelopmentTools\LibTorchCuda118\libtorch\include;C:\DevelopmentTools\LibTorchCuda118\libtorch\include\torch\csrc\api\include;D:\csi4900\GlowEffect\glow_effect\source;D:\csi4900\GlowEffect;D:\csi4900\wxWidgetLib\lib\vc_x64_lib;D:\csi4900\wxWidgetLib\include\msvc;D:\csi4900\wxWidgetLib\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <PreprocessorDefinitions>WIN32;WIN64;NDEBUG;_CONSOLE;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>C:\Program Files\TensorRT-8.5.3.1\include;C:\Program Files\NVIDIA Corporation\NvToolsExt\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\include;C:\opencv\opencv\build\install\include;C:\libtorch\include;C:\libtorch\include\torch\csrc\api\include;D:\csi4900\glow_mipmap\glow_effect\source;D:\csi4900\glow_mipmap;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Link>
@@ -152,8 +152,8 @@ nvinfer.lib;
 nvonnxparser.lib;
 nvparsers.lib;
 nvinfer_plugin.lib;
-nvToolsExt64_1.lib;wxbase32u.lib;wxmsw32u_core.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>D:\csi4900\wxWidgetLib\lib\vc_x64_lib;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\lib\x64;C:\Program Files\NVIDIA\TensorRT-8.5.3.1\lib;C:\Program Files %28x86%29\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.29.30133\lib\x64;C:\Program Files %28x86%29\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.29.30133\atlmfc\lib\x64;C:\Program Files %28x86%29\Microsoft Visual Studio\2019\Community\VC\Auxiliary\VS\lib\x64;C:\Program Files %28x86%29\Windows Kits\10\Lib\10.0.22000.0\ucrt\x64;C:\Program Files %28x86%29\Microsoft Visual Studio\2019\Community\VC\Auxiliary\VS\UnitTest\lib\x64;C:\Program Files %28x86%29\Windows Kits\10\Lib\10.0.22000.0\um\x64;C:\Program Files %28x86%29\Windows Kits\NETFXSDK\4.8\Lib\um\x64;C:\DevelopmentTools\LibTorchCuda118\libtorch\lib;C:\Program Files\NVIDIA\CUDNN\v8.9.7\lib\x64;C:\DevelopmentTools\OpenCV\install\x64\vc16\lib;C:\Program Files\NVIDIA Corporation\NvToolsExt\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+nvToolsExt64_1.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\lib\x64;C:\Program Files\TensorRT-8.5.3.1\lib;C:\Program Files %28x86%29\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.29.30133\lib\x64;C:\Program Files %28x86%29\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.29.30133\atlmfc\lib\x64;C:\Program Files %28x86%29\Microsoft Visual Studio\2019\Community\VC\Auxiliary\VS\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.19041.0\ucrt\x64;C:\Program Files %28x86%29\Microsoft Visual Studio\2019\Community\VC\Auxiliary\VS\UnitTest\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.19041.0\um\x64;C:\Program Files %28x86%29\Windows Kits\NETFXSDK\4.8\Lib\um\x64;C:\Users\lenovo\AppData\Local\Programs\Python\Python310\Lib;C:\Users\lenovo\AppData\Local\Programs\Python\Python310\Lib\site-packages\torch\lib;C:\opencv\opencv\build\install\x64\vc16\lib;C:\Program Files\NVIDIA Corporation\NvToolsExt\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <CudaCompile>
       <TargetMachinePlatform>64</TargetMachinePlatform>
