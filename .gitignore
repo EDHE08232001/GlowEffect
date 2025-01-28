@@ -39,3 +39,12 @@ Thumbs.db
 
 # Ignore log files
 **/.log
+
+# Ignore Visual Studio Solution Related Files
+# Ignore Visual Studio 2019 solution and project files
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.aps
+*.rc
