@@ -1,6 +1,8 @@
 # Project: Glow Effect
 - Developer: Edward He
-- Email: edhetech01@gmail.com
+    * Email: edhetech01@gmail.com
+- Developer: Leo Wei
+    * Email: 
 
 ## Instructions
 Folder `movie_effect` is included for providing necessary headers in the development of glow_effect, so you can just leave it as it is.
