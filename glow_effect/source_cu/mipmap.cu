@@ -16,7 +16,17 @@
 #include "old_movies.cuh"
 extern bool button_State[5];
 
-
+/**
+ * CUDA kernel to generate a mipmap level by downscaling an input texture.
+ *
+ * This kernel performs 2x2 averaging to create a lower resolution mipmap
+ * from the provided input texture and writes the results to an output surface.
+ *
+ * @param mipOutput  CUDA surface object for the output mipmap.
+ * @param mipInput   CUDA texture object for the input image.
+ * @param imageW     Width of the output mipmap level.
+ * @param imageH     Height of the output mipmap level.
+ */
 __global__ void d_gen_mipmap(
 	cudaSurfaceObject_t mipOutput,
 	cudaTextureObject_t mipInput,
@@ -33,25 +43,25 @@ __global__ void d_gen_mipmap(
 
 	// Ensure the thread operates only within valid image dimensions.
 	if ((x < imageW) && (y < imageH)) {
-		// Take the average of 4 neighboring texels using normalized texture access.
+		// Fetch and average the colors of 4 neighboring texels.
+		// tex2D samples texture at normalized coordinates [0,1] range.
 		float4 color =
 			tex2D<float4>(mipInput, (x + 0.0f) * px, (y + 0.0f) * py) +
 			tex2D<float4>(mipInput, (x + 1.0f) * px, (y + 0.0f) * py) +
 			tex2D<float4>(mipInput, (x + 1.0f) * px, (y + 1.0f) * py) +
 			tex2D<float4>(mipInput, (x + 0.0f) * px, (y + 1.0f) * py);
 
-		// Compute the average color and scale it to the [0, 255] range.
+		// Compute the average color.
 		color /= 4.0f;
-		color *= 255.0f;
+		color *= 255.0f; // Convert to [0,255] range.
 
-		// Clamp the color values to a maximum of 255.
+		// Clamp values to ensure they do not exceed 255.
 		color = fminf(color, make_float4(255.0f));
 
-		// Write the resulting color to the output surface.
+		// Convert to uchar4 format and write the final pixel to the output surface.
 		surf2Dwrite(to_uchar4(color), mipOutput, x * sizeof(uchar4), y);
 	}
 }
-
 
 /**
  * @brief Generates a mipmap chain for a given CUDA mipmapped array.
@@ -206,9 +216,6 @@ __global__ void d_get_mipmap(
 		dout[idx] = to_uchar4(255.0f * data);
 	}
 }
-
-
-
 
 /**
  * @brief Retrieves a mipmap image with a uniform blur applied using CUDA.
