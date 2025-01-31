@@ -257,7 +257,7 @@ int main() {
 			}
 
 			try {
-				glow_effect_video(videoPath.c_str());
+				glow_effect_video(videoPath.c_str(), planFilePath);
 			}
 			catch (const std::exception& e) {
 				std::cerr << "Error processing video: " << e.what() << std::endl;
