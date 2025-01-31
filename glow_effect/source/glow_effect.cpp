@@ -24,6 +24,7 @@
 #include "trtinference.hpp"
 #include <iostream>
 #include <string>
+#include <opencv2/cudawarping.hpp>
 
  // Global Variable Array: button_State
 bool button_State[5] = { false, false, false, false, false };
@@ -347,45 +348,73 @@ void glow_effect_video(const char* video_nm) {
 	int fps = static_cast<int>(video.get(cv::CAP_PROP_FPS));
 
 	// Create an output folder for processed frames.
-	std::string output_folder = "./VideoOutput";
-	std::filesystem::create_directory(output_folder);
+
+	// Create output video writer directy.
+	std::string output_video_path = "./VideoOutput/processed_video.avi";
+	cv::VideoWriter output_video(output_video_path, cv::VideoWriter::fourcc('M', 'J', 'P', 'G'), fps, 
+		cv::Size(frame_width, frame_height));
+
+	if (!output_video.isOpened()) {
+		std::cerr << "Error: COuld not open the ouput video for writing: " << output_video_path << std::endl;
+		return;
+	}
+
+	/*std::string output_folder = "./VideoOutput";
+	std::filesystem::create_directory(output_folder);*/
 
 	// Define the TensorRT plan file path for segmentation.
-	std::string planFilePath = "D:/csi4900/TRT-Plans/mobileone_s4.edhe.plan";          // user config
+	std::string planFilePath = "D:/csi4900/TRT-Plans/mobileone_s4.lw.plan";          // user config
 
-	cv::Mat src_img, dst_img;
+	// Pinned memory allocation for CPU-GPU transfer.
+	float* h_frame;
+	size_t frameSize = frame_width * frame_height * 3;
+	cudaMallocHost((void**)&h_frame, frameSize * sizeof(float));
+
+	cv::cuda::GpuMat gpu_frame;
+
+	std::vector<torch::Tensor> batch_frames;
+
+	// cv::Mat src_img, dst_img;
 	int frame_count = 0; // Counter for saved frames.
 
 	while (video.isOpened()) {
 		// Prepare a batch of frames.
-		std::vector<torch::Tensor> batch_frames;
+		
+		// std::vector<torch::Tensor> batch_frames;
 		std::vector<cv::Mat> original_frames;
+		batch_frames.clear();
 
 		for (int i = 0; i < 4; ++i) {
-			if (!video.read(src_img) || src_img.empty()) {
+			cv::Mat frame;
+			if (!video.read(frame) || frame.empty()) {
 				if (batch_frames.empty()) break; // End of video.
 				batch_frames.push_back(batch_frames.back()); // Pad batch with last frame.
 				original_frames.push_back(original_frames.back().clone());
 				continue;
 			}
 
-			original_frames.push_back(src_img.clone());
+			original_frames.push_back(frame.clone());
+
+			gpu_frame.upload(frame);
+
+			cv::cuda::GpuMat resized_gpu_frame;
+			cv::cuda::resize(gpu_frame, resized_gpu_frame, cv::Size(384, 384));
 
 			// Resize the frame to 384x384 for inference.
-			cv::Mat resized_img;
-			cv::resize(src_img, resized_img, cv::Size(384, 384));
+			/*cv::Mat resized_img;
+			cv::resize(src_img, resized_img, cv::Size(384, 384));*/
 
 			// Save temporary resized image.
-			std::string temp_img_path = "./temp_video_frame_" + std::to_string(i) + ".png";
-			cv::imwrite(temp_img_path, resized_img);
+			/*std::string temp_img_path = "./temp_video_frame_" + std::to_string(i) + ".png";
+			cv::imwrite(temp_img_path, resized_img);*/
 
 			// Convert the image to a tensor.
-			torch::Tensor frame_tensor = ImageProcessingUtil::process_img(temp_img_path, false);
+			torch::Tensor frame_tensor = ImageProcessingUtil::process_img(resized_gpu_frame, false);
 			frame_tensor = frame_tensor.to(torch::kFloat);
 			batch_frames.push_back(frame_tensor);
 
 			// Remove the temporary file.
-			std::filesystem::remove(temp_img_path);
+			// std::filesystem::remove(temp_img_path);
 		}
 
 		if (batch_frames.empty()) break; // All frames processed.
@@ -432,9 +461,11 @@ void glow_effect_video(const char* video_nm) {
 					return;
 				}
 
+				output_video.write(final_result);
+
 				// Save the processed frame.
-				std::string frame_output_path = output_folder + "/frame_" + std::to_string(frame_count++) + ".png";
-				cv::imwrite(frame_output_path, final_result);
+				/*std::string frame_output_path = output_folder + "/frame_" + std::to_string(frame_count++) + ".png";
+				cv::imwrite(frame_output_path, final_result);*/
 			}
 		}
 		else {
@@ -444,10 +475,10 @@ void glow_effect_video(const char* video_nm) {
 
 	// Release video resources and close display windows.
 	video.release();
-	cv::destroyAllWindows();
+	
 
 	// Create the output video from processed frames.
-	std::string output_video_path = output_folder + "/processed_video.avi";
+	/*std::string output_video_path = output_folder + "/processed_video.avi";
 	cv::VideoWriter output_video(output_video_path, cv::VideoWriter::fourcc('M', 'J', 'P', 'G'), fps,
 		cv::Size(frame_width, frame_height));
 
@@ -464,8 +495,10 @@ void glow_effect_video(const char* video_nm) {
 			continue;
 		}
 		output_video.write(frame);
-	}
+	}*/
 
 	output_video.release();
+	cudaFreeHost(h_frame);
+	cv::destroyAllWindows();
 	std::cout << "Video processing completed. Saved to: " << output_video_path << std::endl;
 }

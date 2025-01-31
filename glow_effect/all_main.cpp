@@ -99,7 +99,7 @@ int main() {
 		// Launch GUI in a separate thread
 		std::thread guiThread(set_control);
 
-		std::string planFilePath = "D:/csi4900/TRT-Plans/mobileone_s4.edhe.plan";
+		std::string planFilePath = "D:/csi4900/TRT-Plans/mobileone_s4.lw.plan";
 		std::string userInput;
 
 		printf("Do you want to input a single image, an image directory, or a video file? (single/directory/video): ");
@@ -231,7 +231,7 @@ int main() {
 
 			// choose default path or customized path
 			if (videoInputOption == "y") {
-				videoPath = "D:/csi4900/GlowEffect/glow_effect/resource/racing_cars.sd.mp4"; // use your own path
+				videoPath = "D:/csi4900/glow_mipmap/glow_effect/resource/racing_cars.sd.mp4"; // use your own path
 			}
 			else {
 				printf("Enter the full path of the video file: ");

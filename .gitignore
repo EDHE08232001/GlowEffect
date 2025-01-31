@@ -39,3 +39,6 @@ Thumbs.db
 
 # Ignore log files
 **/.log
+
+# Ignore glow_effect.vcxproj file
+glow_effect/glow_effect.vcxproj
