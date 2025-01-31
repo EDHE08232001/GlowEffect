@@ -416,7 +416,7 @@ void glow_effect_image(const char* image_nm, const cv::Mat& grayscale_mask) {
  * @pre  `video_nm` must point to a valid video file (supported by OpenCV).
  * @post Outputs processed frames into `./VideoOutput` and saves a compiled video `processed_video.avi`.
  */
-void glow_effect_video(const char* video_nm, std::string planFilePath) {
+void glow_effect_video(const char* video_nm) {
 	// For debugging and informational purposes, print out the OpenCV build info.
 	cv::String info = cv::getBuildInformation();
 	std::cout << info << std::endl;
@@ -440,7 +440,7 @@ void glow_effect_video(const char* video_nm, std::string planFilePath) {
 
 	// Create output video writer directy.
 	std::string output_video_path = "./VideoOutput/processed_video.avi";
-	cv::VideoWriter output_video(output_video_path, cv::VideoWriter::fourcc('M', 'J', 'P', 'G'), fps, 
+	cv::VideoWriter output_video(output_video_path, cv::VideoWriter::fourcc('M', 'J', 'P', 'G'), fps,
 		cv::Size(frame_width, frame_height));
 
 	if (!output_video.isOpened()) {
@@ -579,8 +579,8 @@ void glow_effect_video(const char* video_nm, std::string planFilePath) {
 	}
 
 	// When we reach here, we've either processed all frames or encountered a break condition.
-	
-	
+
+
 
 	// Create the output video from processed frames.
 	/*std::string output_video_path = output_folder + "/processed_video.avi";
@@ -606,7 +606,7 @@ void glow_effect_video(const char* video_nm, std::string planFilePath) {
 		output_video.write(frame);
 	}*/
 
-	
+
 	video.release();
 	output_video.release();
 	cudaFreeHost(h_frame);

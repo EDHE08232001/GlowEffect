@@ -4,7 +4,7 @@
   mipmap.cu
 cl : Command line warning D9025: overriding '/MD' with '/MT'
 cl : Command line warning D9025: overriding '/MD' with '/MT'
-  tmpxft_00005d30_00000000-7_mipmap.cudafe1.cpp
+  tmpxft_00002644_00000000-7_mipmap.cudafe1.cpp
 cl : Command line warning D9025: overriding '/MD' with '/MT'
   all_main.cpp
 C:\libtorch\include\c10\util\Exception.h(30,45): warning C4275: non dll-interface class 'std::exception' used as base for dll-interface class 'c10::Error'
@@ -3774,8 +3774,8 @@ C:\libtorch\include\c10\core\SymNodeImpl.h(214): message : see declaration of 's
 C:\libtorch\include\torch\csrc\api\include\torch\optim\schedulers\reduce_on_plateau_scheduler.h(56,22): warning C4251: 'torch::optim::ReduceLROnPlateauScheduler::min_lrs': class 'std::vector<float,std::allocator<float>>' needs to have dll-interface to be used by clients of class 'torch::optim::ReduceLROnPlateauScheduler'
 C:\opencv\opencv\build\install\include\opencv2\features2d.hpp(254): message : see declaration of 'std::vector<float,std::allocator<float>>'
 C:\Program Files\TensorRT-8.5.3.1\include\NvInfer.h(6102,1): warning C4819: The file contains a character that cannot be represented in the current code page (932). Save the file in Unicode format to prevent data loss
-D:\csi4900\glow_mipmap\glow_effect\source\glow_effect.cpp(309,61): warning C4244: 'argument': conversion from 'int' to 'float', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\glow_effect.cpp(453,75): warning C4244: 'argument': conversion from 'int' to 'float', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\glow_effect.cpp(385,61): warning C4244: 'argument': conversion from 'int' to 'float', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\glow_effect.cpp(555,75): warning C4244: 'argument': conversion from 'int' to 'float', possible loss of data
 C:\libtorch\include\c10\util\SmallVector.h(99,1): warning C4267: '=': conversion from 'size_t' to 'Size_T', possible loss of data
           with
           [
@@ -4294,12 +4294,12 @@ C:\libtorch\include\torch\csrc\autograd\function.h(202): message : see reference
               T=torch::autograd::InputMetadata
           ]
 C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.29.30133\include\optional(69,1): warning C4267: 'initializing': conversion from 'size_t' to 'int', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\glow_effect.cpp(505): message : see reference to function template instantiation 'std::_Optional_destruct_base<_Ty,true>::_Optional_destruct_base<const unsigned __int64>(std::in_place_t,const unsigned __int64 &&)' being compiled
+D:\csi4900\glow_mipmap\glow_effect\source\glow_effect.cpp(618): message : see reference to function template instantiation 'std::_Optional_destruct_base<_Ty,true>::_Optional_destruct_base<const unsigned __int64>(std::in_place_t,const unsigned __int64 &&)' being compiled
           with
           [
               _Ty=int32_t
           ]
-D:\csi4900\glow_mipmap\glow_effect\source\glow_effect.cpp(505): message : see reference to function template instantiation 'std::_Optional_destruct_base<_Ty,true>::_Optional_destruct_base<const unsigned __int64>(std::in_place_t,const unsigned __int64 &&)' being compiled
+D:\csi4900\glow_mipmap\glow_effect\source\glow_effect.cpp(618): message : see reference to function template instantiation 'std::_Optional_destruct_base<_Ty,true>::_Optional_destruct_base<const unsigned __int64>(std::in_place_t,const unsigned __int64 &&)' being compiled
           with
           [
               _Ty=int32_t
@@ -8073,25 +8073,25 @@ C:\libtorch\include\torch\csrc\api\include\torch\optim\lbfgs.h(85,26): warning C
 C:\libtorch\include\c10\core\SymNodeImpl.h(214): message : see declaration of 'std::optional<int64_t>'
 C:\libtorch\include\torch\csrc\api\include\torch\optim\schedulers\reduce_on_plateau_scheduler.h(56,22): warning C4251: 'torch::optim::ReduceLROnPlateauScheduler::min_lrs': class 'std::vector<float,std::allocator<float>>' needs to have dll-interface to be used by clients of class 'torch::optim::ReduceLROnPlateauScheduler'
 C:\opencv\opencv\build\install\include\opencv2\features2d.hpp(254): message : see declaration of 'std::vector<float,std::allocator<float>>'
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(29,20): warning C4244: 'initializing': conversion from 'int64_t' to 'int', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(46,37): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(47,37): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(48,37): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(49,37): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(194,59): warning C4244: 'argument': conversion from 'int64_t' to 'int', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(194,37): warning C4244: 'argument': conversion from 'int64_t' to 'int', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(246,20): warning C4244: 'initializing': conversion from 'int64_t' to 'int', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(263,43): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(264,43): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(265,43): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(266,43): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(398,73): warning C4244: 'argument': conversion from 'int64_t' to 'int', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(398,46): warning C4244: 'argument': conversion from 'int64_t' to 'int', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(455,20): warning C4244: 'initializing': conversion from 'int64_t' to 'int', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(472,37): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(473,37): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(474,37): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(475,37): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(53,17): warning C4244: 'initializing': conversion from 'int64_t' to 'int', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(71,34): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(72,34): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(73,34): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(74,34): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(226,56): warning C4244: 'argument': conversion from 'int64_t' to 'int', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(226,34): warning C4244: 'argument': conversion from 'int64_t' to 'int', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(294,17): warning C4244: 'initializing': conversion from 'int64_t' to 'int', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(311,40): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(312,40): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(313,40): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(314,40): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(444,67): warning C4244: 'argument': conversion from 'int64_t' to 'int', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(444,40): warning C4244: 'argument': conversion from 'int64_t' to 'int', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(521,17): warning C4244: 'initializing': conversion from 'int64_t' to 'int', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(538,34): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(539,34): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(540,34): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(541,34): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
 C:\libtorch\include\c10\util\SmallVector.h(99,1): warning C4267: '=': conversion from 'size_t' to 'Size_T', possible loss of data
           with
           [
@@ -8610,12 +8610,12 @@ C:\libtorch\include\torch\csrc\autograd\function.h(202): message : see reference
               T=torch::autograd::InputMetadata
           ]
 C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.29.30133\include\optional(69,1): warning C4267: 'initializing': conversion from 'size_t' to 'int', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(627): message : see reference to function template instantiation 'std::_Optional_destruct_base<_Ty,true>::_Optional_destruct_base<const unsigned __int64>(std::in_place_t,const unsigned __int64 &&)' being compiled
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(689): message : see reference to function template instantiation 'std::_Optional_destruct_base<_Ty,true>::_Optional_destruct_base<const unsigned __int64>(std::in_place_t,const unsigned __int64 &&)' being compiled
           with
           [
               _Ty=int32_t
           ]
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(627): message : see reference to function template instantiation 'std::_Optional_destruct_base<_Ty,true>::_Optional_destruct_base<const unsigned __int64>(std::in_place_t,const unsigned __int64 &&)' being compiled
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(689): message : see reference to function template instantiation 'std::_Optional_destruct_base<_Ty,true>::_Optional_destruct_base<const unsigned __int64>(std::in_place_t,const unsigned __int64 &&)' being compiled
           with
           [
               _Ty=int32_t
@@ -8644,75 +8644,5 @@ C:\libtorch\include\ATen\core\function_schema.h(437): message : see reference to
           ]
   wx_gui.cpp
   dilate_erode.hpp
+RC : fatal error RC1110: could not open glow_effect.rc
   
-  D:\csi4900\glow_mipmap\glow_effect>"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\bin\nvcc.exe" -dlink -o x64\Release\glow_effect.device-link.obj -Xcompiler "/EHsc /W3 /nologo /O2 /Fdx64\Release\vc142.pdb   /MT " -L"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\bin/crt" -L"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\lib\x64" -L"C:\Program Files\TensorRT-8.5.3.1\lib" -L"C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.29.30133\lib\x64" -L"C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.29.30133\atlmfc\lib\x64" -L"C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\VS\lib\x64" -L"C:\Program Files (x86)\Windows Kits\10\Lib\10.0.19041.0\ucrt\x64" -L"C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\VS\UnitTest\lib\x64" -L"C:\Program Files (x86)\Windows Kits\10\Lib\10.0.19041.0\um\x64" -L"C:\Program Files (x86)\Windows Kits\NETFXSDK\4.8\Lib\um\x64" -LC:\Users\lenovo\AppData\Local\Programs\Python\Python310\Lib -L"C:\Users\lenovo\AppData\Local\Programs\Python\Python310\Lib\site-packages\torch\lib" -LC:\opencv\opencv\build\install\x64\vc16\lib -L"C:\Program Files\NVIDIA Corporation\NvToolsExt\lib\x64" -L"C:\Users\lenovo\vcpkg\installed\x64-windows\lib" -L"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\lib\x64" -L"C:\Users\lenovo\vcpkg\installed\x64-windows\lib" -L"C:\Users\lenovo\vcpkg\installed\x64-windows\lib\manual-link" kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib torch.lib torch_cpu.lib torch_cuda.lib cuda.lib cudart.lib cublas.lib cufft.lib cudnn.lib nvrtc.lib c10.lib opencv_img_hash470.lib opencv_world470.lib nvinfer.lib nvonnxparser.lib nvparsers.lib nvinfer_plugin.lib nvToolsExt64_1.lib wxbase32u.lib wxmsw32u_core.lib cudadevrt.lib "C:\Users\lenovo\vcpkg\installed\x64-windows\lib\GlU32.Lib" "C:\Users\lenovo\vcpkg\installed\x64-windows\lib\jpeg.lib" "C:\Users\lenovo\vcpkg\installed\x64-windows\lib\libexpat.lib" "C:\Users\lenovo\vcpkg\installed\x64-windows\lib\libpng16.lib" "C:\Users\lenovo\vcpkg\installed\x64-windows\lib\lzma.lib" "C:\Users\lenovo\vcpkg\installed\x64-windows\lib\nanosvg.lib" "C:\Users\lenovo\vcpkg\installed\x64-windows\lib\nanosvgrast.lib" "C:\Users\lenovo\vcpkg\installed\x64-windows\lib\OpenGL32.Lib" "C:\Users\lenovo\vcpkg\installed\x64-windows\lib\pcre2-16.lib" "C:\Users\lenovo\vcpkg\installed\x64-windows\lib\pcre2-32.lib" "C:\Users\lenovo\vcpkg\installed\x64-windows\lib\pcre2-8.lib" "C:\Users\lenovo\vcpkg\installed\x64-windows\lib\pcre2-posix.lib" "C:\Users\lenovo\vcpkg\installed\x64-windows\lib\tiff.lib" "C:\Users\lenovo\vcpkg\installed\x64-windows\lib\turbojpeg.lib" "C:\Users\lenovo\vcpkg\installed\x64-windows\lib\wxbase32u.lib" "C:\Users\lenovo\vcpkg\installed\x64-windows\lib\wxbase32u_net.lib" "C:\Users\lenovo\vcpkg\installed\x64-windows\lib\wxbase32u_xml.lib" "C:\Users\lenovo\vcpkg\installed\x64-windows\lib\wxmsw32u_adv.lib" "C:\Users\lenovo\vcpkg\installed\x64-windows\lib\wxmsw32u_aui.lib" "C:\Users\lenovo\vcpkg\installed\x64-windows\lib\wxmsw32u_core.lib" "C:\Users\lenovo\vcpkg\installed\x64-windows\lib\wxmsw32u_gl.lib" "C:\Users\lenovo\vcpkg\installed\x64-windows\lib\wxmsw32u_html.lib" "C:\Users\lenovo\vcpkg\installed\x64-windows\lib\wxmsw32u_propgrid.lib" "C:\Users\lenovo\vcpkg\installed\x64-windows\lib\wxmsw32u_qa.lib" "C:\Users\lenovo\vcpkg\installed\x64-windows\lib\wxmsw32u_ribbon.lib" "C:\Users\lenovo\vcpkg\installed\x64-windows\lib\wxmsw32u_richtext.lib" "C:\Users\lenovo\vcpkg\installed\x64-windows\lib\wxmsw32u_stc.lib" "C:\Users\lenovo\vcpkg\installed\x64-windows\lib\wxmsw32u_xrc.lib" "C:\Users\lenovo\vcpkg\installed\x64-windows\lib\zlib.lib"  -gencode=arch=compute_75,code=sm_75  --machine 64 D:\csi4900\glow_mipmap\glow_effect\x64\Release\mipmap.cu.obj 
-  kernel32.lib
-  user32.lib
-  gdi32.lib
-  winspool.lib
-  comdlg32.lib
-  advapi32.lib
-  shell32.lib
-  ole32.lib
-  oleaut32.lib
-  uuid.lib
-  odbc32.lib
-  odbccp32.lib
-  torch.lib
-  torch_cpu.lib
-  torch_cuda.lib
-  cuda.lib
-  cudart.lib
-  cublas.lib
-  cufft.lib
-  cudnn.lib
-  nvrtc.lib
-  c10.lib
-  opencv_img_hash470.lib
-  opencv_world470.lib
-  nvinfer.lib
-  nvonnxparser.lib
-  nvparsers.lib
-  nvinfer_plugin.lib
-  nvToolsExt64_1.lib
-  wxbase32u.lib
-  wxmsw32u_core.lib
-  cudadevrt.lib
-  GlU32.Lib
-  jpeg.lib
-  libexpat.lib
-  libpng16.lib
-  lzma.lib
-  nanosvg.lib
-  nanosvgrast.lib
-  OpenGL32.Lib
-  pcre2-16.lib
-  pcre2-32.lib
-  pcre2-8.lib
-  pcre2-posix.lib
-  tiff.lib
-  turbojpeg.lib
-  wxbase32u.lib
-  wxbase32u_net.lib
-  wxbase32u_xml.lib
-  wxmsw32u_adv.lib
-  wxmsw32u_aui.lib
-  wxmsw32u_core.lib
-  wxmsw32u_gl.lib
-  wxmsw32u_html.lib
-  wxmsw32u_propgrid.lib
-  wxmsw32u_qa.lib
-  wxmsw32u_ribbon.lib
-  wxmsw32u_richtext.lib
-  wxmsw32u_stc.lib
-  wxmsw32u_xrc.lib
-  zlib.lib
-  mipmap.cu.obj
-     Creating library D:\csi4900\glow_mipmap\glow_effect\x64\Release\glow_effect.lib and object D:\csi4900\glow_mipmap\glow_effect\x64\Release\glow_effect.exp
-  Generating code
-  Previous IPDB not found, fall back to full compilation.
-  All 2762 functions were compiled because no usable IPDB/IOBJ from previous compilation was found.
-  Finished generating code
-  glow_effect.vcxproj -> D:\csi4900\glow_mipmap\glow_effect\x64\Release\glow_effect.exe
-  'pwsh.exe' is not recognized as an internal or external command,
-  operable program or batch file.
