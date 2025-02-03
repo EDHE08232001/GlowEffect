@@ -52,3 +52,6 @@ glow_effect/glow_effect.vcxproj
 *.vcxproj.user
 *.aps
 *.rc
+
+# Ignore Useless Files
+._*
