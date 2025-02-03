@@ -1,6 +1,5 @@
 #ifndef TRT_INFERENCE_HPP
 #define TRT_INFERENCE_HPP
-#pragma once
 
 #include <cstdio>
 #include <cstdlib>
@@ -11,7 +10,6 @@
 #include <vector>
 #include <filesystem>
 #include <chrono>
-#include <stdlib.h>
 #include <numeric>
 #include <iterator>
 #include <NvInfer.h>
@@ -21,24 +19,58 @@
 #include <opencv2/quality.hpp>
 #include <opencv2/opencv.hpp>
 #include <torch/torch.h>
+
+// Using declarations for brevity.
 using namespace std;
 using namespace nvinfer1;
 using namespace nvonnxparser;
+
 #include "TRTGeneration.hpp"
-#include "ImageProcessingUtil.hpp" 
+#include "ImageProcessingUtil.hpp"
 
-
+/**
+ * @brief A class providing TensorRT inference routines for segmentation and super-resolution.
+ */
 class TRTInference {
 public:
-    // Measures the performance of TRT inference on super-resolution models
-    static void measure_trt_performance(const std::string& trt_plan, const std::string& original_image_path,
-                                        torch::Tensor img_tensor, int num_trials, bool compare_img_bool);
+	/**
+	 * @brief Measures the performance of TRT inference on super-resolution models.
+	 *
+	 * Loads a TensorRT plan file, performs inference on a single input tensor, and (optionally)
+	 * compares the output with an original image.
+	 *
+	 * @param trt_plan             Path to the serialized TensorRT engine plan file.
+	 * @param original_image_path  Path to the original image file for comparison.
+	 * @param img_tensor           A 4D tensor (NCHW) containing the preprocessed input image data.
+	 * @param num_trials           Number of inference runs for performance measurement.
+	 * @param compare_img_bool     If true, compares the final output with the original image.
+	 */
+	static void measure_trt_performance(const std::string& trt_plan, const std::string& original_image_path,
+		torch::Tensor img_tensor, int num_trials, bool compare_img_bool);
 
-    // Measures the performance of TRT inference on segmentation models
-    static void measure_segmentation_trt_performance(const std::string& trt_plan, torch::Tensor img_tensor, int num_trials);
-   
-    // Modified measure_segmentation_trt_performance_mul to return a vector of grayscale images
-    static std::vector<cv::Mat> measure_segmentation_trt_performance_mul(const std::string& trt_plan, torch::Tensor img_tensor, int num_trials);
+	/**
+	 * @brief Measures the performance of TRT inference on segmentation models.
+	 *
+	 * Performs inference on a single input tensor and measures latency over a specified number of trials.
+	 *
+	 * @param trt_plan   Path to the serialized TensorRT engine plan file.
+	 * @param img_tensor A 4D tensor (NCHW) containing the preprocessed input image data.
+	 * @param num_trials Number of inference runs for performance measurement.
+	 */
+	static void measure_segmentation_trt_performance(const std::string& trt_plan, torch::Tensor img_tensor, int num_trials);
+
+	/**
+	 * @brief Performs segmentation inference on a batch of images and returns grayscale outputs.
+	 *
+	 * Loads a TensorRT plan file, processes a batched input tensor, measures latency, and converts
+	 * the final output into a vector of single-channel OpenCV Mats.
+	 *
+	 * @param trt_plan   Path to the serialized TensorRT engine plan file.
+	 * @param img_tensor A 4D tensor (NCHW) containing batched preprocessed images.
+	 * @param num_trials Number of inference runs for performance measurement.
+	 * @return A vector of OpenCV Mats, each representing a grayscale segmentation map.
+	 */
+	static std::vector<cv::Mat> measure_segmentation_trt_performance_mul(const std::string& trt_plan, torch::Tensor img_tensor, int num_trials);
 };
 
-#endif
+#endif // TRT_INFERENCE_HPP

@@ -2,7 +2,7 @@
 <Project>
   <ProjectOutputs>
     <ProjectOutput>
-      <FullPath>D:\csi4900\glow_mipmap\glow_effect\x64\Release\glow_effect.exe</FullPath>
+      <FullPath>D:\csi4900\GlowEffect\glow_effect\x64\Release\glow_effect.exe</FullPath>
     </ProjectOutput>
   </ProjectOutputs>
   <ContentFiles />

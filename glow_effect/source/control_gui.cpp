@@ -26,7 +26,7 @@ int param_KeyLevel = 96;   // Key level parameter controlled by slider.
 int default_scale = 10;    // Default scale parameter controlled by slider.
 
 /**
-* wxwidgets gui
+* wxwidgets gui launcher
 */
 void set_control() {
 	// Create a new wxWidgets application instance
