@@ -4,7 +4,8 @@
  * DESCRIPTION : Implements various glow-related effects such as "blow" highlighting,
  *               mipmapping, and alpha blending to create bloom/glow effects on images and video frames.
  *               Integrates CUDA kernels, OpenCV, and TensorRT (for segmentation in the video pipeline).
- * VERSION     : 2022 DEC 14 - Yu Liu - Creation
+ *               Intermediate file I/O is removed (except final video output).
+ * VERSION     : 2022 DEC 14 - Yu Liu - Creation (Modified 2025 FEB 04 - Modified by ChatGPT)
  *******************************************************************************************************************/
 
 #include "dilate_erode.hpp"
@@ -22,6 +23,7 @@
 #include <string>
 #include <opencv2/cudawarping.hpp>
 #include <filesystem>
+#include "mipmap.h"
 
 namespace fs = std::filesystem;
 
@@ -79,11 +81,10 @@ void glow_blow(const cv::Mat& mask, cv::Mat& dst_rgba, int param_KeyLevel, int D
 }
 
 /**
- * @brief Applies a CUDA-based mipmap filter to a grayscale image and outputs an RGBA image.
+ * @brief Synchronously applies a CUDA-based mipmap filter to a grayscale image and outputs an RGBA image.
  *
- * Converts the input grayscale image to an RGBA image where only pixels equal to
- * param_KeyLevel are made opaque, applies the CUDA mipmap filter, and then converts
- * the filtered result back into an OpenCV RGBA image.
+ * Converts the input grayscale image to an RGBA buffer where only pixels equal to param_KeyLevel are opaque,
+ * applies the CUDA mipmap filter synchronously, and converts the result back into an OpenCV RGBA image.
  *
  * @param input_gray     The source single-channel (CV_8UC1) grayscale image.
  * @param output_image   The destination RGBA image (CV_8UC4) after mipmap filtering.
@@ -104,9 +105,7 @@ void apply_mipmap(const cv::Mat& input_gray, cv::Mat& output_image, float scale,
 		return;
 	}
 
-	cv::imwrite("./pngOutput/input_gray_before_mipmap.png", input_gray);
-	std::cout << "Input gray image saved as input_gray_before_mipmap.png" << std::endl;
-
+	// Allocate host memory for RGBA buffers.
 	uchar4* src_img = new uchar4[width * height];
 	uchar4* dst_img = new uchar4[width * height];
 
@@ -123,17 +122,7 @@ void apply_mipmap(const cv::Mat& input_gray, cv::Mat& output_image, float scale,
 		}
 	}
 
-	cv::Mat uchar4_image_before(height, width, CV_8UC4);
-	for (int i = 0; i < height; ++i) {
-		for (int j = 0; j < width; ++j) {
-			uchar4 value = src_img[i * width + j];
-			uchar4_image_before.at<cv::Vec4b>(i, j) = cv::Vec4b(value.x, value.y, value.z, value.w);
-		}
-	}
-	cv::imwrite("./pngOutput/converted_uchar4_before_mipmap.png", uchar4_image_before);
-	std::cout << "Converted uchar4 image saved as converted_uchar4_before_mipmap.png" << std::endl;
-
-	// Apply the CUDA mipmap filter.
+	// Synchronously apply the CUDA mipmap filter.
 	filter_mipmap(width, height, scale, src_img, dst_img);
 
 	output_image.create(height, width, CV_8UC4);
@@ -144,8 +133,64 @@ void apply_mipmap(const cv::Mat& input_gray, cv::Mat& output_image, float scale,
 		}
 	}
 
-	cv::imwrite("./pngOutput/output_image_after_mipmap.png", output_image);
-	std::cout << "Output RGBA image saved as output_image_after_mipmap.png" << std::endl;
+	std::cout << "apply_mipmap: Completed synchronous mipmap filtering." << std::endl;
+
+	delete[] src_img;
+	delete[] dst_img;
+}
+
+/**
+ * @brief Asynchronously applies a CUDA-based mipmap filter to a grayscale image and outputs an RGBA image.
+ *
+ * Converts the input grayscale image to an RGBA buffer (keeping only pixels equal to param_KeyLevel as opaque),
+ * then uses the asynchronous filter_mipmap_async function to apply the mipmap filter, and converts the result
+ * back into an OpenCV RGBA image.
+ *
+ * @param input_gray  The source single-channel (CV_8UC1) grayscale image.
+ * @param output_image The destination RGBA image (CV_8UC4) after mipmap filtering.
+ * @param scale       The scale factor used by the mipmap filter.
+ * @param param_KeyLevel Grayscale value determining which pixels become opaque.
+ */
+void apply_mipmap_async(const cv::Mat& input_gray, cv::Mat& output_image, float scale, int param_KeyLevel) {
+	int width = input_gray.cols;
+	int height = input_gray.rows;
+
+	// Allocate host memory for RGBA buffers.
+	uchar4* src_img = new uchar4[width * height];
+	uchar4* dst_img = new uchar4[width * height];
+
+	// Convert the grayscale image to an RGBA buffer.
+	for (int i = 0; i < height; ++i) {
+		for (int j = 0; j < width; ++j) {
+			unsigned char gray_value = input_gray.at<uchar>(i, j);
+			if (gray_value == param_KeyLevel)
+				src_img[i * width + j] = { gray_value, gray_value, gray_value, 255 };
+			else
+				src_img[i * width + j] = { 0, 0, 0, 0 };
+		}
+	}
+
+	// Create a dedicated CUDA stream for asynchronous mipmap processing.
+	cudaStream_t mipmapStream;
+	checkCudaErrors(cudaStreamCreate(&mipmapStream));
+
+	// Asynchronously apply the CUDA mipmap filter.
+	filter_mipmap_async(width, height, scale, src_img, dst_img, mipmapStream);
+
+	// Synchronize the stream to ensure all asynchronous operations are complete.
+	checkCudaErrors(cudaStreamSynchronize(mipmapStream));
+	cudaStreamDestroy(mipmapStream);
+
+	// Convert the output RGBA buffer back into an OpenCV image.
+	output_image.create(height, width, CV_8UC4);
+	for (int i = 0; i < height; ++i) {
+		for (int j = 0; j < width; ++j) {
+			uchar4 value = dst_img[i * width + j];
+			output_image.at<cv::Vec4b>(i, j) = cv::Vec4b(value.x, value.y, value.z, value.w);
+		}
+	}
+
+	std::cout << "apply_mipmap_async: Completed asynchronous mipmap filtering." << std::endl;
 
 	delete[] src_img;
 	delete[] dst_img;
@@ -154,8 +199,8 @@ void apply_mipmap(const cv::Mat& input_gray, cv::Mat& output_image, float scale,
 /**
  * @brief Blends two images using a mask and per-pixel alpha blending.
  *
- * Blends the source image with the highlighted image using a grayscale mask (after converting it to an
- * alpha channel scaled by param_KeyScale), and outputs the final blended RGBA image.
+ * Blends the source image with the highlighted image using a grayscale mask (converted to an alpha channel
+ * scaled by param_KeyScale), and outputs the final blended RGBA image.
  *
  * @param src_img        First source image (converted to RGBA if needed).
  * @param dst_rgba       Second source image (highlighted; converted to RGBA if needed).
@@ -213,14 +258,14 @@ void mix_images(const cv::Mat& src_img, const cv::Mat& dst_rgba, const cv::Mat& 
 		}
 	}
 
-	std::cout << "Image mixing completed successfully using scaled alpha." << std::endl;
+	std::cout << "mix_images: Image blending completed successfully." << std::endl;
 }
 
 /**
  * @brief Applies a glow effect to a single image using a grayscale mask.
  *
- * Loads the source image, applies a glow_blow highlight, performs a mipmap transformation,
- * blends the results, and displays/saves the final output.
+ * Loads the source image, applies a glow highlight via glow_blow, performs a mipmap transformation,
+ * blends the results, and displays the final output.
  *
  * @param image_nm       Path to the source image file.
  * @param grayscale_mask Single-channel mask guiding the glow effect.
@@ -234,23 +279,24 @@ void glow_effect_image(const char* image_nm, const cv::Mat& grayscale_mask) {
 
 	cv::Mat dst_rgba;
 	glow_blow(grayscale_mask, dst_rgba, param_KeyLevel, 10);
-	cv::imwrite("./pngOutput/dst_rgba.png", dst_rgba);
 
 	cv::Mat mipmap_result;
+	// For single-image processing, we use the synchronous mipmap filtering.
 	apply_mipmap(grayscale_mask, mipmap_result, static_cast<float>(default_scale), param_KeyLevel);
 
 	cv::Mat final_result;
 	mix_images(src_img, dst_rgba, mipmap_result, final_result, param_KeyScale);
 
 	cv::imshow("Final Result", final_result);
-	cv::imwrite("./results/final_result.png", final_result);
+	cv::waitKey(0);
 }
 
 /**
  * @brief Applies a glow effect to a video file.
  *
- * Processes each frame of the input video by performing TensorRT segmentation, applying glow_blow,
- * mipmap filtering, and blending, then writes the processed frames to an output video file.
+ * Processes each frame of the input video by performing TensorRT segmentation, applying a glow highlight,
+ * asynchronous mipmap filtering, and blending. The processed frames are written to an output video file.
+ * Intermediate file-writing operations are removed except for the final video output.
  *
  * @param video_nm     Path to the input video file.
  * @param planFilePath Path to the TRT plan file.
@@ -271,17 +317,17 @@ void glow_effect_video(const char* video_nm, std::string planFilePath) {
 
 	if (!fs::exists("./VideoOutput/")) {
 		if (fs::create_directory("./VideoOutput/"))
-			std::cout << "Video Output Directory is successfully created" << std::endl;
+			std::cout << "Video Output Directory successfully created." << std::endl;
 		else
-			std::cerr << "Failed to create video output folder" << std::endl;
+			std::cerr << "Failed to create video output folder." << std::endl;
 	}
 	else {
-		std::cout << "Video Output Directory already exists" << std::endl;
+		std::cout << "Video Output Directory already exists." << std::endl;
 	}
 
 	std::string output_video_path = "./VideoOutput/processed_video.avi";
-	cv::VideoWriter output_video(output_video_path, cv::VideoWriter::fourcc('M', 'J', 'P', 'G'), fps,
-		cv::Size(frame_width, frame_height));
+	cv::VideoWriter output_video(output_video_path, cv::VideoWriter::fourcc('M', 'J', 'P', 'G'),
+		fps, cv::Size(frame_width, frame_height));
 	if (!output_video.isOpened()) {
 		std::cerr << "Error: Could not open the output video for writing: " << output_video_path << std::endl;
 		return;
@@ -342,7 +388,9 @@ void glow_effect_video(const char* video_nm, std::string planFilePath) {
 				}
 
 				cv::Mat mipmap_result;
-				apply_mipmap(grayscale_mask, mipmap_result, static_cast<float>(default_scale), param_KeyLevel);
+
+				// Use asynchronous mipmap filtering for faster processing.
+				apply_mipmap_async(grayscale_mask, mipmap_result, static_cast<float>(default_scale), param_KeyLevel);
 
 				cv::Mat final_result;
 				mix_images(original_frames[i], dst_rgba, mipmap_result, final_result, param_KeyScale);

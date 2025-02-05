@@ -15,6 +15,7 @@
  ********************************************************************************************************************/
 
 #include "old_movies.cuh"
+#include "mipmap.h"
 extern bool button_State[5];
 
 /**
@@ -323,5 +324,189 @@ void filter_mipmap(const int width, const int height, const float scale, const u
 	get_mipmap(mm_array, make_int3(width, height, n_level), scale, dst_img);
 
 	// Free the allocated CUDA mipmapped array.
+	checkCudaErrors(cudaFreeMipmappedArray(mm_array));
+}
+
+///////////////////////////////////////////////////////////////////////////
+// Asynchronous Functions Are Created Below
+///////////////////////////////////////////////////////////////////////////
+
+/**
+ * @brief Asynchronously generates all mipmap levels for a given mipmapped array.
+ *
+ * This function loops through the mipmap levels and launches the mipmap generation kernel
+ * on the provided CUDA stream. It reads from the current level and writes to the next level.
+ *
+ * @param mipmapArray The CUDA mipmapped array allocated for the image.
+ * @param size The extent (width and height) of the highest resolution level.
+ * @param stream The CUDA stream on which to launch the kernels asynchronously.
+ */
+static void gen_mipmap_async(cudaMipmappedArray_t& mipmapArray, cudaExtent size, cudaStream_t stream) {
+	size_t width = size.width;
+	size_t height = size.height;
+	uint level = 0;
+	while (width != 1 || height != 1) {
+		width = std::max((size_t)1, width / 2);
+		height = std::max((size_t)1, height / 2);
+
+		// Retrieve current (levelFrom) and next (levelTo) mipmap levels.
+		cudaArray_t levelFrom;
+		checkCudaErrors(cudaGetMipmappedArrayLevel(&levelFrom, mipmapArray, level));
+		cudaArray_t levelTo;
+		checkCudaErrors(cudaGetMipmappedArrayLevel(&levelTo, mipmapArray, level + 1));
+
+		// Sanity check: verify that the next level has the expected dimensions.
+		cudaExtent levelToSize;
+		checkCudaErrors(cudaArrayGetInfo(NULL, &levelToSize, NULL, levelTo));
+		assert(levelToSize.width == width);
+		assert(levelToSize.height == height);
+
+		// Set up a texture object for reading from the current level.
+		cudaResourceDesc texResrc = {};
+		texResrc.resType = cudaResourceTypeArray;
+		texResrc.res.array.array = levelFrom;
+		cudaTextureDesc texDescr = {};
+		texDescr.normalizedCoords = 1;
+		texDescr.filterMode = cudaFilterModeLinear;
+		texDescr.addressMode[0] = cudaAddressModeClamp;
+		texDescr.addressMode[1] = cudaAddressModeClamp;
+		texDescr.readMode = cudaReadModeNormalizedFloat;
+
+		cudaTextureObject_t texInput;
+		checkCudaErrors(cudaCreateTextureObject(&texInput, &texResrc, &texDescr, NULL));
+
+		// Set up a surface object for writing to the next level.
+		cudaResourceDesc surfRes = {};
+		surfRes.resType = cudaResourceTypeArray;
+		surfRes.res.array.array = levelTo;
+		cudaSurfaceObject_t surfOutput;
+		checkCudaErrors(cudaCreateSurfaceObject(&surfOutput, &surfRes));
+
+		// Configure kernel launch parameters.
+		dim3 blockSize(16, 16, 1);
+		dim3 gridSize((uint(width) + blockSize.x - 1) / blockSize.x,
+			(uint(height) + blockSize.y - 1) / blockSize.y,
+			1);
+
+		// Launch the mipmap generation kernel asynchronously on the provided stream.
+		d_gen_mipmap << <gridSize, blockSize, 0, stream >> > (surfOutput, texInput, (uint)width, (uint)height);
+		checkCudaErrors(cudaGetLastError());
+
+		// Clean up the texture and surface objects.
+		checkCudaErrors(cudaDestroySurfaceObject(surfOutput));
+		checkCudaErrors(cudaDestroyTextureObject(texInput));
+
+		level++;
+	}
+}
+
+/**
+ * @brief Asynchronously retrieves a mipmapped image using texture sampling.
+ *
+ * This function creates a texture object from the given mipmapped array and launches a kernel
+ * to sample the texture using a uniform level-of-detail (LOD) computed from the scale factor.
+ * The output is copied back to host memory asynchronously.
+ *
+ * @param mm_array The CUDA mipmapped array containing the image and its mipmap levels.
+ * @param img_size An int3 representing the original image width, height, and number of mipmap levels.
+ * @param scale The scale factor used to compute the uniform LOD.
+ * @param dout Pointer to host memory where the resulting uchar4 image will be copied.
+ * @param stream The CUDA stream on which to perform the operations.
+ */
+static void get_mipmap_async(cudaMipmappedArray_t mm_array, const int3 img_size, const float scale, uchar4* dout, cudaStream_t stream) {
+	const int width = img_size.x;
+	const int height = img_size.y;
+	const int n_level = img_size.z;
+	const int asize = width * height;
+
+	// Set up the texture resource description for the mipmapped array.
+	cudaResourceDesc texResrc = {};
+	texResrc.resType = cudaResourceTypeMipmappedArray;
+	texResrc.res.mipmap.mipmap = mm_array;
+
+	// Configure the texture description.
+	cudaTextureDesc texDescr = {};
+	texDescr.normalizedCoords = 1;
+	texDescr.filterMode = cudaFilterModeLinear;
+	texDescr.mipmapFilterMode = cudaFilterModeLinear;
+	texDescr.addressMode[0] = cudaAddressModeClamp;
+	texDescr.addressMode[1] = cudaAddressModeClamp;
+	texDescr.maxMipmapLevelClamp = float(n_level - 1);
+	texDescr.readMode = cudaReadModeNormalizedFloat;
+
+	cudaTextureObject_t texEngine;
+	checkCudaErrors(cudaCreateTextureObject(&texEngine, &texResrc, &texDescr, NULL));
+
+	// Allocate device memory for the output.
+	uchar4* d_out;
+	checkCudaErrors(cudaMalloc(&d_out, asize * sizeof(uchar4)));
+
+	// Configure kernel launch parameters.
+	dim3 blockSize(16, 16, 1);
+	dim3 gridSize((width + blockSize.x - 1) / blockSize.x,
+		(height + blockSize.y - 1) / blockSize.y,
+		1);
+
+	// Launch the mipmap sampling kernel asynchronously.
+	d_get_mipmap << <gridSize, blockSize, 0, stream >> > (texEngine, width, height, scale, d_out);
+	checkCudaErrors(cudaGetLastError());
+
+	// Asynchronously copy the output from device to host.
+	checkCudaErrors(cudaMemcpyAsync(dout, d_out, asize * sizeof(uchar4), cudaMemcpyDeviceToHost, stream));
+
+	// Clean up resources.
+	checkCudaErrors(cudaDestroyTextureObject(texEngine));
+	checkCudaErrors(cudaFree(d_out));
+}
+
+/**
+ * @brief Asynchronously applies a mipmap filter to an image.
+ *
+ * This function combines asynchronous memory transfer, mipmap generation, and retrieval. It first
+ * allocates a CUDA mipmapped array, copies the source image (src_img) into level 0 of the array
+ * asynchronously, then generates all subsequent mipmap levels, and finally retrieves the filtered
+ * result back into host memory (dst_img). All operations are performed on the provided CUDA stream.
+ *
+ * @param width The width of the input image.
+ * @param height The height of the input image.
+ * @param scale The scale factor for mipmap sampling.
+ * @param src_img Pointer to the source image data in host memory (RGBA format as uchar4).
+ * @param dst_img Pointer to the host memory buffer where the output image will be stored.
+ * @param stream The CUDA stream to use for asynchronous operations.
+ */
+void filter_mipmap_async(const int width, const int height, const float scale, const uchar4* src_img, uchar4* dst_img, cudaStream_t stream) {
+	// Determine the number of mipmap levels.
+	int n_level = 0;
+	int level = std::max(height, width);
+	while (level) {
+		level >>= 1;
+		n_level++;
+	}
+
+	cudaExtent img_size = { static_cast<size_t>(width), static_cast<size_t>(height), 0 };
+	cudaChannelFormatDesc ch_desc = cudaCreateChannelDesc<uchar4>();
+
+	// Allocate a CUDA mipmapped array.
+	cudaMipmappedArray_t mm_array;
+	checkCudaErrors(cudaMallocMipmappedArray(&mm_array, &ch_desc, img_size, n_level));
+
+	// Copy the source image into level 0 of the mipmapped array asynchronously.
+	cudaArray_t level0;
+	checkCudaErrors(cudaGetMipmappedArrayLevel(&level0, mm_array, 0));
+	cudaMemcpy3DParms cpy_param = {};
+	cpy_param.srcPtr = make_cudaPitchedPtr((void*)src_img, width * sizeof(uchar4), width, height);
+	cpy_param.dstArray = level0;
+	cpy_param.extent = img_size;
+	cpy_param.extent.depth = 1;
+	cpy_param.kind = cudaMemcpyHostToDevice;
+	checkCudaErrors(cudaMemcpy3DAsync(&cpy_param, stream));
+
+	// Generate mipmap levels asynchronously.
+	gen_mipmap_async(mm_array, img_size, stream);
+
+	// Retrieve the final processed mipmap output asynchronously.
+	get_mipmap_async(mm_array, make_int3(width, height, n_level), scale, dst_img, stream);
+
+	// Free the allocated mipmapped array.
 	checkCudaErrors(cudaFreeMipmappedArray(mm_array));
 }
