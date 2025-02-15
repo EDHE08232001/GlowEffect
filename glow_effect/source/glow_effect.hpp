@@ -69,18 +69,19 @@ void glow_blow(const cv::Mat& mask, cv::Mat& dst_rgba, int param_KeyLevel, int D
 void apply_mipmap(const cv::Mat& src, cv::Mat& dst, float scale, int param_KeyLevel);
 
 /**
- * @brief Applies a CUDA-based mipmap filter to a grayscale image and outputs an RGBA image.
+ * @brief Asynchronously applies a CUDA-based mipmap filter to a grayscale image and outputs an RGBA image.
  *
  * The function converts the input grayscale image to an RGBA buffer (keeping only the pixels
  * equal to param_KeyLevel as opaque), then uses the asynchronous filter_mipmap_async function
- * to apply the mipmap filter. The result is converted back into an OpenCV RGBA image.
+ * to apply the mipmap filter on the provided CUDA stream. The result is converted back into an OpenCV RGBA image.
  *
- * @param input_gray The source single-channel (CV_8UC1) grayscale image.
+ * @param input_gray   The source single-channel (CV_8UC1) grayscale image.
  * @param output_image The destination RGBA image (CV_8UC4) after mipmap filtering.
- * @param scale The scale factor used by the mipmap filter.
+ * @param scale        The scale factor used by the mipmap filter.
  * @param param_KeyLevel Grayscale value determining which pixels become opaque.
+ * @param stream       The CUDA stream on which to perform asynchronous mipmap filtering.
  */
-void apply_mipmap_async(const cv::Mat& input_gray, cv::Mat& output_image, float scale, int param_KeyLevel);
+void apply_mipmap_async(const cv::Mat& input_gray, cv::Mat& output_image, float scale, int param_KeyLevel, cudaStream_t stream);
 
 /**
  * @brief Blends two images using a mask and per-pixel alpha blending.

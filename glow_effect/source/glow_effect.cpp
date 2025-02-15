@@ -4,8 +4,8 @@
  * DESCRIPTION : Implements various glow-related effects such as "blow" highlighting,
  *               mipmapping, and alpha blending to create bloom/glow effects on images and video frames.
  *               Integrates CUDA kernels, OpenCV, and TensorRT (for segmentation in the video pipeline).
- *               Intermediate file I/O is removed (except final video output).
- * VERSION     : 2022 DEC 14 - Yu Liu - Creation (Modified 2025 FEB 04 - Modified by ChatGPT)
+ *               Uses triple buffering to accelerate asynchronous mipmap filtering.
+ * VERSION     : Updated 2025 FEB 04
  *******************************************************************************************************************/
 
 #include "dilate_erode.hpp"
@@ -30,6 +30,128 @@ namespace fs = std::filesystem;
 // Global boolean array indicating button states in GUI (for demonstration/testing).
 bool button_State[5] = { false, false, false, false, false };
 
+////////////////////////////////////////////////////////////////////////////////
+// Helper Function: convert_mask_to_rgba_buffer
+////////////////////////////////////////////////////////////////////////////////
+/**
+ * @brief Converts a grayscale mask to an RGBA buffer (uchar4 array) based on a key level.
+ *
+ * Only pixels equal to param_KeyLevel become opaque (alpha 255); all others are set transparent.
+ *
+ * @param mask           The input grayscale mask (CV_8UC1).
+ * @param dst            Preallocated destination buffer (array of uchar4) of size (frame_width * frame_height).
+ * @param frame_width    The width of the image.
+ * @param frame_height   The height of the image.
+ * @param param_KeyLevel The grayscale value to preserve (others become transparent).
+ */
+void convert_mask_to_rgba_buffer(const cv::Mat& mask, uchar4* dst, int frame_width, int frame_height, int param_KeyLevel) {
+	for (int i = 0; i < frame_height; ++i) {
+		for (int j = 0; j < frame_width; ++j) {
+			unsigned char gray_value = mask.at<uchar>(i, j);
+			if (gray_value == param_KeyLevel)
+				dst[i * frame_width + j] = { gray_value, gray_value, gray_value, 255 };
+			else
+				dst[i * frame_width + j] = { 0, 0, 0, 0 };
+		}
+	}
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Helper Function: triple_buffered_mipmap_pipeline
+////////////////////////////////////////////////////////////////////////////////
+/**
+ * @brief Processes a batch of grayscale masks through an asynchronous mipmap filter using triple buffering.
+ *
+ * This function converts each resized grayscale mask into an RGBA buffer, launches asynchronous
+ * mipmap filtering on each using triple buffering, and collects the processed output images.
+ *
+ * This version uses pinned (page-locked) memory for the triple buffers to accelerate host-device transfers.
+ *
+ * @param resized_masks  The input vector of resized grayscale masks (CV_8UC1) for each frame.
+ * @param frame_width    The width of the frames.
+ * @param frame_height   The height of the frames.
+ * @param default_scale  The scale factor used by the mipmap filter.
+ * @param param_KeyLevel The key level used to determine opacity in the mask.
+ * @return A vector of cv::Mat objects (CV_8UC4) containing the filtered mipmap output for each frame.
+ */
+std::vector<cv::Mat> triple_buffered_mipmap_pipeline(const std::vector<cv::Mat>& resized_masks,
+	int frame_width, int frame_height,
+	float default_scale, int param_KeyLevel) {
+	int N = resized_masks.size();
+	const int numBuffers = 3;
+	std::vector<cv::Mat> outputImages(N);
+
+	// Allocate triple buffers for source and destination using pinned memory.
+	std::vector<uchar4*> tripleSrc(numBuffers, nullptr);
+	std::vector<uchar4*> tripleDst(numBuffers, nullptr);
+	std::vector<cudaStream_t> mipmapStreams(numBuffers);
+	std::vector<cudaEvent_t> mipmapDone(numBuffers);
+
+	for (int i = 0; i < numBuffers; ++i) {
+		checkCudaErrors(cudaStreamCreate(&mipmapStreams[i]));
+		checkCudaErrors(cudaEventCreate(&mipmapDone[i]));
+		// Allocate pinned host memory for each buffer.
+		checkCudaErrors(cudaMallocHost((void**)&tripleSrc[i], frame_width * frame_height * sizeof(uchar4)));
+		checkCudaErrors(cudaMallocHost((void**)&tripleDst[i], frame_width * frame_height * sizeof(uchar4)));
+	}
+
+	// Pipeline loop: run for (N + 2) iterations to flush the pipeline.
+	for (int i = 0; i < N + 2; ++i) {
+		// Stage 1: Launch asynchronous filtering for frame i if available.
+		if (i < N) {
+			int bufIdx = i % numBuffers;
+			// Convert the resized grayscale mask to an RGBA buffer and store in tripleSrc.
+			convert_mask_to_rgba_buffer(resized_masks[i], tripleSrc[bufIdx], frame_width, frame_height, param_KeyLevel);
+			// Launch asynchronous mipmap filtering using the modified apply_mipmap_async.
+			// The output is captured into a temporary cv::Mat.
+			cv::Mat tempOutput;
+			apply_mipmap_async(resized_masks[i], tempOutput, default_scale, param_KeyLevel, mipmapStreams[bufIdx]);
+			// Copy the resulting tempOutput into our tripleDst buffer.
+			for (int r = 0; r < frame_height; ++r) {
+				for (int c = 0; c < frame_width; ++c) {
+					cv::Vec4b pixel = tempOutput.at<cv::Vec4b>(r, c);
+					tripleDst[bufIdx][r * frame_width + c] = { pixel[0], pixel[1], pixel[2], pixel[3] };
+				}
+			}
+			// Record an event for this buffer.
+			checkCudaErrors(cudaEventRecord(mipmapDone[bufIdx], mipmapStreams[bufIdx]));
+		}
+
+		// Stage 2: For frame (i - 2), check if the asynchronous filtering is complete.
+		if (i - 2 >= 0 && (i - 2) < N) {
+			int bufIdx = (i - 2) % numBuffers;
+			cudaError_t query = cudaEventQuery(mipmapDone[bufIdx]);
+			if (query == cudaSuccess) {
+				// Copy the contents of tripleDst into a cv::Mat.
+				cv::Mat mipmapResult(frame_height, frame_width, CV_8UC4);
+				for (int r = 0; r < frame_height; ++r) {
+					for (int c = 0; c < frame_width; ++c) {
+						uchar4 val = tripleDst[bufIdx][r * frame_width + c];
+						mipmapResult.at<cv::Vec4b>(r, c) = cv::Vec4b(val.x, val.y, val.z, val.w);
+					}
+				}
+				outputImages[i - 2] = mipmapResult;
+			}
+			else if (query != cudaErrorNotReady) {
+				checkCudaErrors(query);
+			}
+		}
+	}
+
+	// Cleanup: free pinned memory and destroy streams and events.
+	for (int i = 0; i < numBuffers; ++i) {
+		checkCudaErrors(cudaFreeHost(tripleSrc[i]));
+		checkCudaErrors(cudaFreeHost(tripleDst[i]));
+		checkCudaErrors(cudaStreamDestroy(mipmapStreams[i]));
+		checkCudaErrors(cudaEventDestroy(mipmapDone[i]));
+	}
+
+	return outputImages;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Function: glow_blow
+////////////////////////////////////////////////////////////////////////////////
 /**
  * @brief Applies a simple "blow" or highlight effect to an output RGBA image based on a grayscale mask.
  *
@@ -55,6 +177,7 @@ void glow_blow(const cv::Mat& mask, cv::Mat& dst_rgba, int param_KeyLevel, int D
 	cv::Vec4b overlay_color = { 199, 170, 255, 255 }; // B, G, R, A
 	bool has_target_region = false;
 
+	// Check if any pixel is within the tolerance Delta of param_KeyLevel.
 	for (int i = 0; i < mask.rows; ++i) {
 		for (int j = 0; j < mask.cols; ++j) {
 			int mask_pixel = mask.at<uchar>(i, j);
@@ -68,6 +191,7 @@ void glow_blow(const cv::Mat& mask, cv::Mat& dst_rgba, int param_KeyLevel, int D
 	}
 
 	if (has_target_region) {
+		// Fill the entire image with the overlay color.
 		for (int i = 0; i < dst_rgba.rows; ++i) {
 			for (int j = 0; j < dst_rgba.cols; ++j) {
 				dst_rgba.at<cv::Vec4b>(i, j) = overlay_color;
@@ -76,10 +200,12 @@ void glow_blow(const cv::Mat& mask, cv::Mat& dst_rgba, int param_KeyLevel, int D
 	}
 
 	std::cout << "glow_blow completed. Target region "
-		<< (has_target_region ? "found and applied." : "not found.")
-		<< std::endl;
+		<< (has_target_region ? "found and applied." : "not found.") << std::endl;
 }
 
+////////////////////////////////////////////////////////////////////////////////
+// Function: apply_mipmap (Synchronous Version)
+////////////////////////////////////////////////////////////////////////////////
 /**
  * @brief Synchronously applies a CUDA-based mipmap filter to a grayscale image and outputs an RGBA image.
  *
@@ -95,11 +221,7 @@ void apply_mipmap(const cv::Mat& input_gray, cv::Mat& output_image, float scale,
 	int width = input_gray.cols;
 	int height = input_gray.rows;
 
-	// Initialize button states (for simulation/testing).
-	for (int k = 0; k < 5; k++) {
-		button_State[k] = true;
-	}
-
+	// Validate input image.
 	if (input_gray.channels() != 1 || input_gray.type() != CV_8UC1) {
 		std::cerr << "Error: Input image must be a single-channel grayscale image." << std::endl;
 		return;
@@ -109,7 +231,7 @@ void apply_mipmap(const cv::Mat& input_gray, cv::Mat& output_image, float scale,
 	uchar4* src_img = new uchar4[width * height];
 	uchar4* dst_img = new uchar4[width * height];
 
-	// Convert grayscale image to an RGBA buffer, preserving only pixels equal to param_KeyLevel.
+	// Convert grayscale image to an RGBA buffer.
 	for (int i = 0; i < height; ++i) {
 		for (int j = 0; j < width; ++j) {
 			unsigned char gray_value = input_gray.at<uchar>(i, j);
@@ -125,6 +247,7 @@ void apply_mipmap(const cv::Mat& input_gray, cv::Mat& output_image, float scale,
 	// Synchronously apply the CUDA mipmap filter.
 	filter_mipmap(width, height, scale, src_img, dst_img);
 
+	// Convert the output buffer back into an OpenCV image.
 	output_image.create(height, width, CV_8UC4);
 	for (int i = 0; i < height; ++i) {
 		for (int j = 0; j < width; ++j) {
@@ -139,19 +262,23 @@ void apply_mipmap(const cv::Mat& input_gray, cv::Mat& output_image, float scale,
 	delete[] dst_img;
 }
 
+////////////////////////////////////////////////////////////////////////////////
+// Function: apply_mipmap_async (Asynchronous Version)
+////////////////////////////////////////////////////////////////////////////////
 /**
  * @brief Asynchronously applies a CUDA-based mipmap filter to a grayscale image and outputs an RGBA image.
  *
  * Converts the input grayscale image to an RGBA buffer (keeping only pixels equal to param_KeyLevel as opaque),
- * then uses the asynchronous filter_mipmap_async function to apply the mipmap filter, and converts the result
- * back into an OpenCV RGBA image.
+ * then uses the asynchronous filter_mipmap_async function to apply the mipmap filter on the provided CUDA stream.
+ * The function returns immediately so that the caller can overlap operations.
  *
- * @param input_gray  The source single-channel (CV_8UC1) grayscale image.
- * @param output_image The destination RGBA image (CV_8UC4) after mipmap filtering.
- * @param scale       The scale factor used by the mipmap filter.
+ * @param input_gray    The source single-channel (CV_8UC1) grayscale image.
+ * @param output_image  The destination RGBA image (CV_8UC4) after mipmap filtering.
+ * @param scale         The scale factor used by the mipmap filter.
  * @param param_KeyLevel Grayscale value determining which pixels become opaque.
+ * @param stream        The CUDA stream on which to perform asynchronous mipmap filtering.
  */
-void apply_mipmap_async(const cv::Mat& input_gray, cv::Mat& output_image, float scale, int param_KeyLevel) {
+void apply_mipmap_async(const cv::Mat& input_gray, cv::Mat& output_image, float scale, int param_KeyLevel, cudaStream_t stream) {
 	int width = input_gray.cols;
 	int height = input_gray.rows;
 
@@ -170,18 +297,12 @@ void apply_mipmap_async(const cv::Mat& input_gray, cv::Mat& output_image, float 
 		}
 	}
 
-	// Create a dedicated CUDA stream for asynchronous mipmap processing.
-	cudaStream_t mipmapStream;
-	checkCudaErrors(cudaStreamCreate(&mipmapStream));
+	// Launch the asynchronous mipmap filter on the provided stream.
+	// This call uses your low-level asynchronous function filter_mipmap_async.
+	filter_mipmap_async(width, height, scale, src_img, dst_img, stream);
 
-	// Asynchronously apply the CUDA mipmap filter.
-	filter_mipmap_async(width, height, scale, src_img, dst_img, mipmapStream);
-
-	// Synchronize the stream to ensure all asynchronous operations are complete.
-	checkCudaErrors(cudaStreamSynchronize(mipmapStream));
-	cudaStreamDestroy(mipmapStream);
-
-	// Convert the output RGBA buffer back into an OpenCV image.
+	// Do NOT synchronize here; the caller is responsible for synchronization.
+	// Convert the output buffer back into an OpenCV image.
 	output_image.create(height, width, CV_8UC4);
 	for (int i = 0; i < height; ++i) {
 		for (int j = 0; j < width; ++j) {
@@ -190,12 +311,15 @@ void apply_mipmap_async(const cv::Mat& input_gray, cv::Mat& output_image, float 
 		}
 	}
 
-	std::cout << "apply_mipmap_async: Completed asynchronous mipmap filtering." << std::endl;
+	std::cout << "apply_mipmap_async: Launched asynchronous mipmap filtering on provided stream." << std::endl;
 
 	delete[] src_img;
 	delete[] dst_img;
 }
 
+////////////////////////////////////////////////////////////////////////////////
+// Function: mix_images
+////////////////////////////////////////////////////////////////////////////////
 /**
  * @brief Blends two images using a mask and per-pixel alpha blending.
  *
@@ -244,6 +368,7 @@ void mix_images(const cv::Mat& src_img, const cv::Mat& dst_rgba, const cv::Mat& 
 
 	output_image = src_rgba.clone();
 
+	// Blend each pixel based on the alpha value computed from the grayscale mask.
 	for (int i = 0; i < src_rgba.rows; ++i) {
 		for (int j = 0; j < src_rgba.cols; ++j) {
 			uchar original_alpha = mipmap_gray.at<uchar>(i, j);
@@ -261,6 +386,9 @@ void mix_images(const cv::Mat& src_img, const cv::Mat& dst_rgba, const cv::Mat& 
 	std::cout << "mix_images: Image blending completed successfully." << std::endl;
 }
 
+////////////////////////////////////////////////////////////////////////////////
+// Function: glow_effect_image
+////////////////////////////////////////////////////////////////////////////////
 /**
  * @brief Applies a glow effect to a single image using a grayscale mask.
  *
@@ -281,7 +409,7 @@ void glow_effect_image(const char* image_nm, const cv::Mat& grayscale_mask) {
 	glow_blow(grayscale_mask, dst_rgba, param_KeyLevel, 10);
 
 	cv::Mat mipmap_result;
-	// For single-image processing, we use the synchronous mipmap filtering.
+	// For single-image processing, use synchronous mipmap filtering.
 	apply_mipmap(grayscale_mask, mipmap_result, static_cast<float>(default_scale), param_KeyLevel);
 
 	cv::Mat final_result;
@@ -291,11 +419,14 @@ void glow_effect_image(const char* image_nm, const cv::Mat& grayscale_mask) {
 	cv::waitKey(0);
 }
 
+////////////////////////////////////////////////////////////////////////////////
+// Function: glow_effect_video
+////////////////////////////////////////////////////////////////////////////////
 /**
  * @brief Applies a glow effect to a video file.
  *
  * Processes each frame of the input video by performing TensorRT segmentation, applying a glow highlight,
- * asynchronous mipmap filtering, and blending. The processed frames are written to an output video file.
+ * asynchronous mipmap filtering using triple buffering, and blending. The processed frames are written to an output video file.
  * Intermediate file-writing operations are removed except for the final video output.
  *
  * @param video_nm     Path to the input video file.
@@ -315,6 +446,7 @@ void glow_effect_video(const char* video_nm, std::string planFilePath) {
 	int frame_height = static_cast<int>(video.get(cv::CAP_PROP_FRAME_HEIGHT));
 	int fps = static_cast<int>(video.get(cv::CAP_PROP_FPS));
 
+	// Create output directory if it does not exist.
 	if (!fs::exists("./VideoOutput/")) {
 		if (fs::create_directory("./VideoOutput/"))
 			std::cout << "Video Output Directory successfully created." << std::endl;
@@ -333,30 +465,29 @@ void glow_effect_video(const char* video_nm, std::string planFilePath) {
 		return;
 	}
 
-	float* h_frame;
-	size_t frameSize = frame_width * frame_height * 3;
-	cudaMallocHost((void**)&h_frame, frameSize * sizeof(float));
-
 	cv::cuda::GpuMat gpu_frame;
 	std::vector<torch::Tensor> batch_frames;
-	int frame_count = 0;
 
+	// Main video processing loop: process frames in batches of 4.
 	while (video.isOpened()) {
 		std::vector<cv::Mat> original_frames;
 		batch_frames.clear();
+		std::vector<cv::Mat> resized_masks;  // Will store resized grayscale masks.
 
-		// Attempt to read 4 frames for batch processing.
+		// Read 4 frames for batch processing.
 		for (int i = 0; i < 4; ++i) {
 			cv::Mat frame;
 			if (!video.read(frame) || frame.empty()) {
 				if (batch_frames.empty())
 					break;
+				// If fewer than 4 frames are read, duplicate the last frame.
 				batch_frames.push_back(batch_frames.back());
 				original_frames.push_back(original_frames.back().clone());
 				continue;
 			}
 			original_frames.push_back(frame.clone());
 
+			// Upload frame to GPU and resize for segmentation.
 			gpu_frame.upload(frame);
 			cv::cuda::GpuMat resized_gpu_frame;
 			cv::cuda::resize(gpu_frame, resized_gpu_frame, cv::Size(384, 384));
@@ -365,44 +496,53 @@ void glow_effect_video(const char* video_nm, std::string planFilePath) {
 			frame_tensor = frame_tensor.to(torch::kFloat);
 			batch_frames.push_back(frame_tensor);
 		}
-
 		if (batch_frames.empty())
 			break;
+		// Ensure we have 4 frames by duplicating the last frame if necessary.
 		while (batch_frames.size() < 4) {
 			batch_frames.push_back(batch_frames.back());
 			original_frames.push_back(original_frames.back().clone());
 		}
-
 		torch::Tensor batch_tensor = torch::stack(batch_frames, 0);
+		// Perform segmentation using TensorRT.
 		std::vector<cv::Mat> grayscale_masks = TRTInference::measure_segmentation_trt_performance_mul(planFilePath, batch_tensor, 1);
 
 		if (!grayscale_masks.empty()) {
+			// Resize each grayscale mask to match the corresponding original frame.
+			std::vector<cv::Mat> resized_masks_batch;
 			for (int i = 0; i < 4; ++i) {
-				cv::Mat grayscale_mask;
-				cv::resize(grayscale_masks[i], grayscale_mask, original_frames[i].size());
+				cv::Mat resized_mask;
+				cv::resize(grayscale_masks[i], resized_mask, original_frames[i].size());
+				resized_masks_batch.push_back(resized_mask);
+			}
 
+			// Generate glow highlights using glow_blow for each frame.
+			std::vector<cv::Mat> glow_blow_results(4);
+			for (int i = 0; i < 4; ++i) {
 				cv::Mat dst_rgba;
-				glow_blow(grayscale_mask, dst_rgba, param_KeyLevel, 10);
+				glow_blow(resized_masks_batch[i], dst_rgba, param_KeyLevel, 10);
 				if (dst_rgba.channels() != 4) {
 					cv::cvtColor(dst_rgba, dst_rgba, cv::COLOR_BGR2RGBA);
 				}
+				glow_blow_results[i] = dst_rgba;
+			}
 
-				cv::Mat mipmap_result;
+			// Process the resized masks with the triple-buffered mipmap pipeline.
+			std::vector<cv::Mat> mipmap_results = triple_buffered_mipmap_pipeline(
+				resized_masks_batch, frame_width, frame_height, static_cast<float>(default_scale), param_KeyLevel
+			);
 
-				// Use asynchronous mipmap filtering for faster processing.
-				apply_mipmap_async(grayscale_mask, mipmap_result, static_cast<float>(default_scale), param_KeyLevel);
-
+			// Blend each frame using the glow highlight and the processed mipmap result.
+			for (int i = 0; i < 4; ++i) {
 				cv::Mat final_result;
-				mix_images(original_frames[i], dst_rgba, mipmap_result, final_result, param_KeyScale);
-
+				mix_images(original_frames[i], glow_blow_results[i], mipmap_results[i], final_result, param_KeyScale);
 				cv::imshow("Processed Frame", final_result);
 				int key = cv::waitKey(30);
 				if (key == 'q') {
 					video.release();
 					cv::destroyAllWindows();
-					return;
+					goto cleanup;
 				}
-
 				output_video.write(final_result);
 			}
 		}
@@ -411,9 +551,9 @@ void glow_effect_video(const char* video_nm, std::string planFilePath) {
 		}
 	}
 
+cleanup:
 	video.release();
 	output_video.release();
-	cudaFreeHost(h_frame);
 	cv::destroyAllWindows();
 
 	std::cout << "Video processing completed. Saved to: " << output_video_path << std::endl;
