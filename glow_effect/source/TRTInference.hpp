@@ -19,6 +19,9 @@
 #include <opencv2/quality.hpp>
 #include <opencv2/opencv.hpp>
 #include <torch/torch.h>
+#include <future>       // for std::async, std::future
+#include <thread>       // for std::thread
+#include <mutex>        // for std::mutex
 
 // Using declarations for brevity.
 using namespace std;
@@ -71,6 +74,20 @@ public:
 	 * @return A vector of OpenCV Mats, each representing a grayscale segmentation map.
 	 */
 	static std::vector<cv::Mat> measure_segmentation_trt_performance_mul(const std::string& trt_plan, torch::Tensor img_tensor, int num_trials);
+
+	/**
+	 * @brief Performs segmentation inference on a batch of images concurrently using multiple streams.
+	 *
+	 * This function splits the input batch into sub-batches and processes each sub-batch on its own
+	 * non-blocking CUDA stream and execution context. Pinned memory is used for fast host-device transfers.
+	 * The segmentation results from all sub-batches are merged and returned as a vector of OpenCV Mats.
+	 *
+	 * @param trt_plan         Path to the serialized TensorRT engine plan file.
+	 * @param img_tensor_batch A 4D tensor (NCHW) containing batched preprocessed images.
+	 * @param num_trials       Number of inference runs for warm-up.
+	 * @return A vector of OpenCV Mats, each representing a grayscale segmentation map.
+	 */
+	static std::vector<cv::Mat> measure_segmentation_trt_performance_mul_concurrent(const std::string& trt_plan, torch::Tensor img_tensor_batch, int num_trials);
 };
 
 #endif // TRT_INFERENCE_HPP

@@ -1,4 +1,4 @@
-#ifndef GLOW_EFFECT_HPP
+﻿#ifndef GLOW_EFFECT_HPP
 #define GLOW_EFFECT_HPP
 
 #include <cuda_runtime.h>
@@ -7,7 +7,9 @@
 #include <string>
 #include <opencv2/imgproc.hpp>
 
-// External variables (controlled by GUI)
+/**
+ * External GUI-controlled variables.
+ */
 extern int button_id;
 extern int param_KeyScale;
 extern int param_KeyLevel;
@@ -71,23 +73,24 @@ void apply_mipmap(const cv::Mat& src, cv::Mat& dst, float scale, int param_KeyLe
 /**
  * @brief Asynchronously applies a CUDA-based mipmap filter to a grayscale image and outputs an RGBA image.
  *
- * The function converts the input grayscale image to an RGBA buffer (keeping only the pixels
+ * Converts the input grayscale image to an RGBA buffer (keeping only the pixels
  * equal to param_KeyLevel as opaque), then uses the asynchronous filter_mipmap_async function
- * to apply the mipmap filter on the provided CUDA stream. The result is converted back into an OpenCV RGBA image.
+ * on the provided non-blocking CUDA stream. The result is written directly into the caller-provided
+ * pinned destination buffer.
  *
- * @param input_gray   The source single-channel (CV_8UC1) grayscale image.
- * @param output_image The destination RGBA image (CV_8UC4) after mipmap filtering.
- * @param scale        The scale factor used by the mipmap filter.
+ * @param input_gray    The source single-channel (CV_8UC1) grayscale image.
+ * @param dst_img       Pointer to the preallocated pinned host memory for the output RGBA image.
+ * @param scale         The scale factor used by the mipmap filter.
  * @param param_KeyLevel Grayscale value determining which pixels become opaque.
- * @param stream       The CUDA stream on which to perform asynchronous mipmap filtering.
+ * @param stream        The non-blocking CUDA stream on which to perform asynchronous mipmap filtering.
  */
-void apply_mipmap_async(const cv::Mat& input_gray, cv::Mat& output_image, float scale, int param_KeyLevel, cudaStream_t stream);
+void apply_mipmap_async(const cv::Mat& input_gray, uchar4* dst_img, float scale, int param_KeyLevel, cudaStream_t stream);
 
 /**
  * @brief Blends two images using a mask and per-pixel alpha blending.
  *
  * The function blends a source image with a highlighted image using a grayscale mask
- * (interpreted as alpha values scaled by param_KeyScale), producing a final RGBA output.
+ * (interpreted as alpha values scaled by param_KeyScale), producing a final blended RGBA output.
  *
  * @param src_img        First source image.
  * @param dst_rgba       Second source image (highlighted).
