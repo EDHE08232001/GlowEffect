@@ -88,6 +88,25 @@ public:
 	 * @return A vector of OpenCV Mats, each representing a grayscale segmentation map.
 	 */
 	static std::vector<cv::Mat> measure_segmentation_trt_performance_mul_concurrent(const std::string& trt_plan, torch::Tensor img_tensor_batch, int num_trials);
+
+	/**
+	 * @brief Performs segmentation inference on a batch of images with CUDA Graph acceleration where possible.
+	 *
+	 * This function implements a hybrid approach to CUDA Graph acceleration:
+	 * - Uses separate streams for graph-compatible operations and memory transfers
+	 * - Attempts to capture only TensorRT inference in the CUDA Graph (not memory transfers)
+	 * - Falls back to regular execution if TensorRT's internal operations are incompatible with graph capture
+	 * - Reports performance metrics for either execution mode
+	 *
+	 * The function maintains the same multi-threading model as the concurrent version,
+	 * processing sub-batches in parallel while using pinned memory for efficient transfers.
+	 *
+	 * @param trt_plan         Path to the serialized TensorRT engine plan file.
+	 * @param img_tensor_batch A 4D tensor (NCHW) containing batched preprocessed images.
+	 * @param num_trials       Number of inference runs for warm-up.
+	 * @return A vector of OpenCV Mats, each representing a grayscale segmentation map.
+	 */
+	static std::vector<cv::Mat> measure_segmentation_trt_performance_mul_concurrent_graph(const std::string& trt_plan, torch::Tensor img_tensor_batch, int num_trials);
 };
 
 #endif // TRT_INFERENCE_HPP

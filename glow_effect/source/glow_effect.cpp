@@ -309,7 +309,6 @@ void glow_effect_video(const char* video_nm, std::string planFilePath) {
 	int frame_height = static_cast<int>(video.get(cv::CAP_PROP_FRAME_HEIGHT));
 	int fps = static_cast<int>(video.get(cv::CAP_PROP_FPS));
 
-	// Use a default size if video frame size is invalid.
 	cv::Size defaultSize((frame_width > 0) ? frame_width : 640, (frame_height > 0) ? frame_height : 360);
 
 	if (!fs::exists("./VideoOutput/")) {
@@ -335,29 +334,29 @@ void glow_effect_video(const char* video_nm, std::string planFilePath) {
 	}
 
 	cv::cuda::GpuMat gpu_frame;
+	// Containers for 8 frames per iteration.
 	std::vector<torch::Tensor> batch_frames;
 	std::vector<cv::Mat> original_frames;
 
-	// Use a future to run segmentation concurrently.
-	std::future<std::vector<cv::Mat>> segFuture;
-	bool segFutureValid = false;
+	// Use two futures to run segmentation concurrently on sub-batches.
+	std::future<std::vector<cv::Mat>> segFuture1, segFuture2;
+	bool segFutureValid1 = false, segFutureValid2 = false;
 
 	while (video.isOpened()) {
 		batch_frames.clear();
 		original_frames.clear();
 
-		// Read a batch of 4 frames.
-		for (int i = 0; i < 4; ++i) {
+		// Read a batch of 8 frames.
+		for (int i = 0; i < 8; ++i) {
 			cv::Mat frame;
 			if (!video.read(frame) || frame.empty()) {
 				if (batch_frames.empty())
 					break;
-				// Duplicate the last valid frame.
+				// Duplicate the last valid frame if we run out.
 				batch_frames.push_back(batch_frames.back());
 				original_frames.push_back(original_frames.back().clone());
 				continue;
 			}
-			// If the frame is invalid, replace with a blank image.
 			if (frame.empty() || frame.cols <= 0 || frame.rows <= 0) {
 				std::cerr << "Warning: Read frame " << i << " is invalid. Using default blank image." << std::endl;
 				frame = cv::Mat(defaultSize, CV_8UC3, cv::Scalar(0, 0, 0));
@@ -380,41 +379,355 @@ void glow_effect_video(const char* video_nm, std::string planFilePath) {
 		}
 		if (batch_frames.empty())
 			break;
-		while (batch_frames.size() < 4) {
+		while (batch_frames.size() < 8) {
 			batch_frames.push_back(batch_frames.back());
 			original_frames.push_back(original_frames.back().clone());
 		}
-		torch::Tensor batch_tensor = torch::stack(batch_frames, 0);
-		if (batch_tensor.dim() == 5 && batch_tensor.size(1) == 1)
-			batch_tensor = batch_tensor.squeeze(1);
-		if (batch_tensor.size(0) < 4) {
-			int pad = 4 - batch_tensor.size(0);
-			torch::Tensor last_frame = batch_tensor[batch_tensor.size(0) - 1].unsqueeze(0);
-			torch::Tensor padTensor = last_frame.repeat({ pad, 1, 1, 1 });
-			batch_tensor = torch::cat({ batch_tensor, padTensor }, 0);
-		}
 
-		// Process segmentation result from the previous batch, if available.
-		if (segFutureValid) {
-			std::vector<cv::Mat> grayscale_masks = segFuture.get();
-			segFutureValid = false;
-
+		// Process segmentation results from the previous iteration, if available.
+		if (segFutureValid1) {
+			std::vector<cv::Mat> grayscale_masks = segFuture1.get();
+			segFutureValid1 = false;
+			// Process first sub-batch (frames 0 to 3)
 			std::vector<cv::Mat> resized_masks_batch;
 			for (int i = 0; i < 4; ++i) {
 				cv::Mat resized_mask;
-				cv::Size targetSize;
-				if (original_frames[i].empty() || original_frames[i].cols <= 0 || original_frames[i].rows <= 0) {
-					std::cerr << "Warning: Original frame " << i << " has invalid size. Using default size." << std::endl;
-					targetSize = defaultSize;
-				}
-				else {
-					targetSize = original_frames[i].size();
-				}
+				cv::Size targetSize = (original_frames[i].empty() || original_frames[i].cols <= 0 || original_frames[i].rows <= 0)
+					? defaultSize : original_frames[i].size();
 				try {
 					cv::resize(grayscale_masks[i], resized_mask, targetSize);
 				}
 				catch (cv::Exception& e) {
-					std::cerr << "Error during segmentation mask resize: " << e.what() << ". Using blank mask." << std::endl;
+					std::cerr << "Error during segmentation mask resize for sub-batch 1 frame " << i
+						<< ": " << e.what() << ". Using blank mask." << std::endl;
+					resized_mask = cv::Mat(targetSize, CV_8UC1, cv::Scalar(0));
+				}
+				resized_masks_batch.push_back(resized_mask);
+			}
+
+			std::vector<cv::Mat> glow_blow_results(4);
+			for (int i = 0; i < 4; ++i) {
+				cv::Mat dst_rgba;
+				glow_blow(resized_masks_batch[i], dst_rgba, param_KeyLevel, 10);
+				if (dst_rgba.channels() != 4)
+					cv::cvtColor(dst_rgba, dst_rgba, cv::COLOR_BGR2RGBA);
+				glow_blow_results[i] = dst_rgba;
+			}
+			std::vector<cv::Mat> mipmap_results = triple_buffered_mipmap_pipeline(
+				resized_masks_batch, frame_width, frame_height, static_cast<float>(default_scale), param_KeyLevel
+			);
+			for (int i = 0; i < 4; ++i) {
+				cv::Mat final_result;
+				mix_images(original_frames[i], glow_blow_results[i], mipmap_results[i], final_result, param_KeyScale);
+				if (final_result.empty() || final_result.size().width <= 0 || final_result.size().height <= 0) {
+					std::cerr << "Warning: Final blended image is empty for sub-batch 1 frame " << i
+						<< ". Creating blank output." << std::endl;
+					final_result = cv::Mat(defaultSize, CV_8UC4, cv::Scalar(0, 0, 0, 255));
+				}
+				cv::imshow("Processed Frame", final_result);
+				int key = cv::waitKey(30);
+				if (key == 'q') {
+					video.release();
+					cv::destroyAllWindows();
+					goto cleanup;
+				}
+				output_video.write(final_result);
+			}
+		}
+		if (segFutureValid2) {
+			std::vector<cv::Mat> grayscale_masks = segFuture2.get();
+			segFutureValid2 = false;
+			// Process second sub-batch (frames 4 to 7)
+			std::vector<cv::Mat> resized_masks_batch;
+			for (int i = 4; i < 8; ++i) {
+				cv::Mat resized_mask;
+				cv::Size targetSize = (original_frames[i].empty() || original_frames[i].cols <= 0 || original_frames[i].rows <= 0)
+					? defaultSize : original_frames[i].size();
+				try {
+					cv::resize(grayscale_masks[i - 4], resized_mask, targetSize);
+				}
+				catch (cv::Exception& e) {
+					std::cerr << "Error during segmentation mask resize for sub-batch 2 frame " << i - 4
+						<< ": " << e.what() << ". Using blank mask." << std::endl;
+					resized_mask = cv::Mat(targetSize, CV_8UC1, cv::Scalar(0));
+				}
+				resized_masks_batch.push_back(resized_mask);
+			}
+			std::vector<cv::Mat> glow_blow_results(4);
+			for (int i = 0; i < 4; ++i) {
+				cv::Mat dst_rgba;
+				glow_blow(resized_masks_batch[i], dst_rgba, param_KeyLevel, 10);
+				if (dst_rgba.channels() != 4)
+					cv::cvtColor(dst_rgba, dst_rgba, cv::COLOR_BGR2RGBA);
+				glow_blow_results[i] = dst_rgba;
+			}
+			std::vector<cv::Mat> mipmap_results = triple_buffered_mipmap_pipeline(
+				resized_masks_batch, frame_width, frame_height, static_cast<float>(default_scale), param_KeyLevel
+			);
+			for (int i = 0; i < 4; ++i) {
+				cv::Mat final_result;
+				mix_images(original_frames[i + 4], glow_blow_results[i], mipmap_results[i], final_result, param_KeyScale);
+				if (final_result.empty() || final_result.size().width <= 0 || final_result.size().height <= 0) {
+					std::cerr << "Warning: Final blended image is empty for sub-batch 2 frame " << i
+						<< ". Creating blank output." << std::endl;
+					final_result = cv::Mat(defaultSize, CV_8UC4, cv::Scalar(0, 0, 0, 255));
+				}
+				cv::imshow("Processed Frame", final_result);
+				int key = cv::waitKey(30);
+				if (key == 'q') {
+					video.release();
+					cv::destroyAllWindows();
+					goto cleanup;
+				}
+				output_video.write(final_result);
+			}
+		}
+
+		// Prepare segmentation input for the current batch:
+		// Create two sub-batch tensors (each containing 4 frames).
+		torch::Tensor sub_batch_tensor1 = torch::stack(
+			std::vector<torch::Tensor>(batch_frames.begin(), batch_frames.begin() + 4), 0);
+		torch::Tensor sub_batch_tensor2 = torch::stack(
+			std::vector<torch::Tensor>(batch_frames.begin() + 4, batch_frames.end()), 0);
+
+		// Launch segmentation concurrently for both sub-batches.
+		segFuture1 = std::async(std::launch::async,
+			TRTInference::measure_segmentation_trt_performance_mul_concurrent,
+			planFilePath, sub_batch_tensor1, 1);
+		segFutureValid1 = true;
+		segFuture2 = std::async(std::launch::async,
+			TRTInference::measure_segmentation_trt_performance_mul_concurrent,
+			planFilePath, sub_batch_tensor2, 1);
+		segFutureValid2 = true;
+	}
+
+	// If any segmentation result is still pending, process it.
+	if (segFutureValid1) {
+		std::vector<cv::Mat> grayscale_masks = segFuture1.get();
+		std::vector<cv::Mat> resized_masks_batch;
+		for (int i = 0; i < 4; ++i) {
+			cv::Mat resized_mask;
+			cv::Size targetSize = (original_frames[i].empty() || original_frames[i].cols <= 0 || original_frames[i].rows <= 0)
+				? defaultSize : original_frames[i].size();
+			try {
+				cv::resize(grayscale_masks[i], resized_mask, targetSize);
+			}
+			catch (cv::Exception& e) {
+				std::cerr << "Error during final segmentation mask resize for sub-batch 1 frame " << i
+					<< ": " << e.what() << ". Using blank mask." << std::endl;
+				resized_mask = cv::Mat(targetSize, CV_8UC1, cv::Scalar(0));
+			}
+			resized_masks_batch.push_back(resized_mask);
+		}
+		std::vector<cv::Mat> glow_blow_results(4);
+		for (int i = 0; i < 4; ++i) {
+			cv::Mat dst_rgba;
+			glow_blow(resized_masks_batch[i], dst_rgba, param_KeyLevel, 10);
+			if (dst_rgba.channels() != 4)
+				cv::cvtColor(dst_rgba, dst_rgba, cv::COLOR_BGR2RGBA);
+			glow_blow_results[i] = dst_rgba;
+		}
+		std::vector<cv::Mat> mipmap_results = triple_buffered_mipmap_pipeline(
+			resized_masks_batch, frame_width, frame_height, static_cast<float>(default_scale), param_KeyLevel
+		);
+		for (int i = 0; i < 4; ++i) {
+			cv::Mat final_result;
+			mix_images(original_frames[i], glow_blow_results[i], mipmap_results[i], final_result, param_KeyScale);
+			if (final_result.empty() || final_result.size().width <= 0 || final_result.size().height <= 0) {
+				std::cerr << "Warning: Final blended image is empty for final sub-batch 1 frame " << i
+					<< ". Creating blank output." << std::endl;
+				final_result = cv::Mat(defaultSize, CV_8UC4, cv::Scalar(0, 0, 0, 255));
+			}
+			cv::imshow("Processed Frame", final_result);
+			int key = cv::waitKey(30);
+			if (key == 'q') {
+				video.release();
+				cv::destroyAllWindows();
+				goto cleanup;
+			}
+			output_video.write(final_result);
+		}
+	}
+	if (segFutureValid2) {
+		std::vector<cv::Mat> grayscale_masks = segFuture2.get();
+		std::vector<cv::Mat> resized_masks_batch;
+		for (int i = 4; i < 8; ++i) {
+			cv::Mat resized_mask;
+			cv::Size targetSize = (original_frames[i].empty() || original_frames[i].cols <= 0 || original_frames[i].rows <= 0)
+				? defaultSize : original_frames[i].size();
+			try {
+				cv::resize(grayscale_masks[i - 4], resized_mask, targetSize);
+			}
+			catch (cv::Exception& e) {
+				std::cerr << "Error during final segmentation mask resize for sub-batch 2 frame " << i - 4
+					<< ": " << e.what() << ". Using blank mask." << std::endl;
+				resized_mask = cv::Mat(targetSize, CV_8UC1, cv::Scalar(0));
+			}
+			resized_masks_batch.push_back(resized_mask);
+		}
+		std::vector<cv::Mat> glow_blow_results(4);
+		for (int i = 0; i < 4; ++i) {
+			cv::Mat dst_rgba;
+			glow_blow(resized_masks_batch[i], dst_rgba, param_KeyLevel, 10);
+			if (dst_rgba.channels() != 4)
+				cv::cvtColor(dst_rgba, dst_rgba, cv::COLOR_BGR2RGBA);
+			glow_blow_results[i] = dst_rgba;
+		}
+		std::vector<cv::Mat> mipmap_results = triple_buffered_mipmap_pipeline(
+			resized_masks_batch, frame_width, frame_height, static_cast<float>(default_scale), param_KeyLevel
+		);
+		for (int i = 0; i < 4; ++i) {
+			cv::Mat final_result;
+			mix_images(original_frames[i + 4], glow_blow_results[i], mipmap_results[i], final_result, param_KeyScale);
+			if (final_result.empty() || final_result.size().width <= 0 || final_result.size().height <= 0) {
+				std::cerr << "Warning: Final blended image is empty for final sub-batch 2 frame " << i
+					<< ". Creating blank output." << std::endl;
+				final_result = cv::Mat(defaultSize, CV_8UC4, cv::Scalar(0, 0, 0, 255));
+			}
+			cv::imshow("Processed Frame", final_result);
+			int key = cv::waitKey(30);
+			if (key == 'q') {
+				video.release();
+				cv::destroyAllWindows();
+				goto cleanup;
+			}
+			output_video.write(final_result);
+		}
+	}
+
+cleanup:
+	video.release();
+	output_video.release();
+	cv::destroyAllWindows();
+	std::cout << "Video processing completed. Saved to: " << output_video_path << std::endl;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Function: glow_effect_video_graph
+// Description: CUDA Graph accelerated version of glow_effect_video
+////////////////////////////////////////////////////////////////////////////////
+void glow_effect_video_graph(const char* video_nm, std::string planFilePath) {
+	// Performance measurement
+	auto total_start = std::chrono::high_resolution_clock::now();
+
+	cv::String info = cv::getBuildInformation();
+	std::cout << info << std::endl;
+
+	// Open video
+	cv::VideoCapture video;
+	if (!video.open(video_nm, cv::VideoCaptureAPIs::CAP_ANY)) {
+		std::cerr << "Error: Could not open video file: " << video_nm << std::endl;
+		return;
+	}
+
+	int frame_width = static_cast<int>(video.get(cv::CAP_PROP_FRAME_WIDTH));
+	int frame_height = static_cast<int>(video.get(cv::CAP_PROP_FRAME_HEIGHT));
+	int fps = static_cast<int>(video.get(cv::CAP_PROP_FPS));
+
+	cv::Size defaultSize((frame_width > 0) ? frame_width : 640, (frame_height > 0) ? frame_height : 360);
+
+	// Create output directory if needed
+	if (!fs::exists("./VideoOutput/")) {
+		if (fs::create_directory("./VideoOutput/"))
+			std::cout << "Video Output Directory successfully created." << std::endl;
+		else {
+			std::cerr << "Failed to create video output folder." << std::endl;
+			return;
+		}
+	}
+	else {
+		std::cout << "Video Output Directory already exists." << std::endl;
+	}
+
+	// Create output video writer
+	std::string output_video_path = "./VideoOutput/processed_video_graph.avi";
+	cv::VideoWriter output_video(output_video_path,
+		cv::VideoWriter::fourcc('M', 'J', 'P', 'G'),
+		fps, cv::Size((frame_width > 0) ? frame_width : defaultSize.width,
+			(frame_height > 0) ? frame_height : defaultSize.height));
+	if (!output_video.isOpened()) {
+		std::cerr << "Error: Could not open the output video for writing: " << output_video_path << std::endl;
+		return;
+	}
+
+	// Performance metrics
+	int total_frames = 0;
+	double segmentation_time = 0.0;
+	double post_processing_time = 0.0;
+
+	// Main video processing - follows same structure as original function
+	cv::cuda::GpuMat gpu_frame;
+	std::vector<torch::Tensor> batch_frames;
+	std::vector<cv::Mat> original_frames;
+
+	// Use two futures to run segmentation concurrently on sub-batches
+	std::future<std::vector<cv::Mat>> segFuture1, segFuture2;
+	bool segFutureValid1 = false, segFutureValid2 = false;
+
+	while (video.isOpened()) {
+		batch_frames.clear();
+		original_frames.clear();
+
+		// Read a batch of 8 frames - same as original function
+		for (int i = 0; i < 8; ++i) {
+			cv::Mat frame;
+			if (!video.read(frame) || frame.empty()) {
+				if (batch_frames.empty())
+					break;
+				batch_frames.push_back(batch_frames.back());
+				original_frames.push_back(original_frames.back().clone());
+				continue;
+			}
+
+			total_frames++; // Count frames for performance metrics
+
+			if (frame.empty() || frame.cols <= 0 || frame.rows <= 0) {
+				std::cerr << "Warning: Read frame " << i << " is invalid. Using default blank image." << std::endl;
+				frame = cv::Mat(defaultSize, CV_8UC3, cv::Scalar(0, 0, 0));
+			}
+			original_frames.push_back(frame.clone());
+
+			gpu_frame.upload(frame);
+			cv::cuda::GpuMat resized_gpu_frame;
+			try {
+				cv::cuda::resize(gpu_frame, resized_gpu_frame, cv::Size(384, 384));
+			}
+			catch (cv::Exception& e) {
+				std::cerr << "Error during GPU resize: " << e.what() << ". Using blank image instead." << std::endl;
+				cv::Mat blank(384, 384, frame.type(), cv::Scalar(0, 0, 0));
+				resized_gpu_frame.upload(blank);
+			}
+			torch::Tensor frame_tensor = ImageProcessingUtil::process_img(resized_gpu_frame, false);
+			frame_tensor = frame_tensor.to(torch::kFloat);
+			batch_frames.push_back(frame_tensor);
+		}
+		if (batch_frames.empty())
+			break;
+
+		while (batch_frames.size() < 8) {
+			batch_frames.push_back(batch_frames.back());
+			original_frames.push_back(original_frames.back().clone());
+		}
+
+		// Process segmentation results from the previous iteration, if available
+		if (segFutureValid1) {
+			auto pp_start = std::chrono::high_resolution_clock::now();
+
+			std::vector<cv::Mat> grayscale_masks = segFuture1.get();
+			segFutureValid1 = false;
+
+			// Process first sub-batch (frames 0 to 3) - same as original function
+			std::vector<cv::Mat> resized_masks_batch;
+			for (int i = 0; i < 4; ++i) {
+				cv::Mat resized_mask;
+				cv::Size targetSize = (original_frames[i].empty() || original_frames[i].cols <= 0 || original_frames[i].rows <= 0)
+					? defaultSize : original_frames[i].size();
+				try {
+					cv::resize(grayscale_masks[i], resized_mask, targetSize);
+				}
+				catch (cv::Exception& e) {
+					std::cerr << "Error during segmentation mask resize for sub-batch 1 frame " << i
+						<< ": " << e.what() << ". Using blank mask." << std::endl;
 					resized_mask = cv::Mat(targetSize, CV_8UC1, cv::Scalar(0));
 				}
 				resized_masks_batch.push_back(resized_mask);
@@ -437,10 +750,11 @@ void glow_effect_video(const char* video_nm, std::string planFilePath) {
 				cv::Mat final_result;
 				mix_images(original_frames[i], glow_blow_results[i], mipmap_results[i], final_result, param_KeyScale);
 				if (final_result.empty() || final_result.size().width <= 0 || final_result.size().height <= 0) {
-					std::cerr << "Warning: Final blended image is empty. Creating blank output." << std::endl;
+					std::cerr << "Warning: Final blended image is empty for sub-batch 1 frame " << i
+						<< ". Creating blank output." << std::endl;
 					final_result = cv::Mat(defaultSize, CV_8UC4, cv::Scalar(0, 0, 0, 255));
 				}
-				cv::imshow("Processed Frame", final_result);
+				cv::imshow("Processed Frame (CUDA Graph)", final_result);
 				int key = cv::waitKey(30);
 				if (key == 'q') {
 					video.release();
@@ -449,37 +763,114 @@ void glow_effect_video(const char* video_nm, std::string planFilePath) {
 				}
 				output_video.write(final_result);
 			}
+
+			auto pp_end = std::chrono::high_resolution_clock::now();
+			post_processing_time += std::chrono::duration<double>(pp_end - pp_start).count();
 		}
 
-		// Launch concurrent segmentation on the current batch.
-		segFuture = std::async(std::launch::async,
-			TRTInference::measure_segmentation_trt_performance_mul_concurrent,
-			planFilePath, batch_tensor, 1);
-		segFutureValid = true;
+		if (segFutureValid2) {
+			auto pp_start = std::chrono::high_resolution_clock::now();
+
+			std::vector<cv::Mat> grayscale_masks = segFuture2.get();
+			segFutureValid2 = false;
+
+			// Process second sub-batch (frames 4 to 7) - same as original function
+			std::vector<cv::Mat> resized_masks_batch;
+			for (int i = 4; i < 8; ++i) {
+				cv::Mat resized_mask;
+				cv::Size targetSize = (original_frames[i].empty() || original_frames[i].cols <= 0 || original_frames[i].rows <= 0)
+					? defaultSize : original_frames[i].size();
+				try {
+					cv::resize(grayscale_masks[i - 4], resized_mask, targetSize);
+				}
+				catch (cv::Exception& e) {
+					std::cerr << "Error during segmentation mask resize for sub-batch 2 frame " << i - 4
+						<< ": " << e.what() << ". Using blank mask." << std::endl;
+					resized_mask = cv::Mat(targetSize, CV_8UC1, cv::Scalar(0));
+				}
+				resized_masks_batch.push_back(resized_mask);
+			}
+
+			std::vector<cv::Mat> glow_blow_results(4);
+			for (int i = 0; i < 4; ++i) {
+				cv::Mat dst_rgba;
+				glow_blow(resized_masks_batch[i], dst_rgba, param_KeyLevel, 10);
+				if (dst_rgba.channels() != 4)
+					cv::cvtColor(dst_rgba, dst_rgba, cv::COLOR_BGR2RGBA);
+				glow_blow_results[i] = dst_rgba;
+			}
+
+			std::vector<cv::Mat> mipmap_results = triple_buffered_mipmap_pipeline(
+				resized_masks_batch, frame_width, frame_height, static_cast<float>(default_scale), param_KeyLevel
+			);
+
+			for (int i = 0; i < 4; ++i) {
+				cv::Mat final_result;
+				mix_images(original_frames[i + 4], glow_blow_results[i], mipmap_results[i], final_result, param_KeyScale);
+				if (final_result.empty() || final_result.size().width <= 0 || final_result.size().height <= 0) {
+					std::cerr << "Warning: Final blended image is empty for sub-batch 2 frame " << i
+						<< ". Creating blank output." << std::endl;
+					final_result = cv::Mat(defaultSize, CV_8UC4, cv::Scalar(0, 0, 0, 255));
+				}
+				cv::imshow("Processed Frame (CUDA Graph)", final_result);
+				int key = cv::waitKey(30);
+				if (key == 'q') {
+					video.release();
+					cv::destroyAllWindows();
+					goto cleanup;
+				}
+				output_video.write(final_result);
+			}
+
+			auto pp_end = std::chrono::high_resolution_clock::now();
+			post_processing_time += std::chrono::duration<double>(pp_end - pp_start).count();
+		}
+
+		// Prepare segmentation for the current batch
+		// Create two sub-batch tensors (each containing 4 frames)
+		torch::Tensor sub_batch_tensor1 = torch::stack(
+			std::vector<torch::Tensor>(batch_frames.begin(), batch_frames.begin() + 4), 0);
+		torch::Tensor sub_batch_tensor2 = torch::stack(
+			std::vector<torch::Tensor>(batch_frames.begin() + 4, batch_frames.end()), 0);
+
+		// Launch segmentation concurrently for both sub-batches - using CUDA Graph version
+		auto seg_start = std::chrono::high_resolution_clock::now();
+
+		segFuture1 = std::async(std::launch::async,
+			TRTInference::measure_segmentation_trt_performance_mul_concurrent_graph, // Use the graph version
+			planFilePath, sub_batch_tensor1, 1);
+		segFutureValid1 = true;
+
+		segFuture2 = std::async(std::launch::async,
+			TRTInference::measure_segmentation_trt_performance_mul_concurrent_graph, // Use the graph version 
+			planFilePath, sub_batch_tensor2, 1);
+		segFutureValid2 = true;
+
+		auto seg_end = std::chrono::high_resolution_clock::now();
+		segmentation_time += std::chrono::duration<double>(seg_end - seg_start).count();
 	}
 
-	if (segFutureValid) {
-		std::vector<cv::Mat> grayscale_masks = segFuture.get();
+	// Process any remaining segmentation results - same as original function
+	if (segFutureValid1) {
+		auto pp_start = std::chrono::high_resolution_clock::now();
+
+		std::vector<cv::Mat> grayscale_masks = segFuture1.get();
 		std::vector<cv::Mat> resized_masks_batch;
 		for (int i = 0; i < 4; ++i) {
 			cv::Mat resized_mask;
-			cv::Size targetSize;
-			if (original_frames[i].empty() || original_frames[i].cols <= 0 || original_frames[i].rows <= 0) {
-				std::cerr << "Warning: Original frame " << i << " has invalid size. Using default size." << std::endl;
-				targetSize = defaultSize;
-			}
-			else {
-				targetSize = original_frames[i].size();
-			}
+			cv::Size targetSize = (original_frames[i].empty() || original_frames[i].cols <= 0 || original_frames[i].rows <= 0)
+				? defaultSize : original_frames[i].size();
 			try {
 				cv::resize(grayscale_masks[i], resized_mask, targetSize);
 			}
 			catch (cv::Exception& e) {
-				std::cerr << "Error during final segmentation mask resize: " << e.what() << ". Using blank mask." << std::endl;
+				std::cerr << "Error during final segmentation mask resize for sub-batch 1 frame " << i
+					<< ": " << e.what() << ". Using blank mask." << std::endl;
 				resized_mask = cv::Mat(targetSize, CV_8UC1, cv::Scalar(0));
 			}
 			resized_masks_batch.push_back(resized_mask);
 		}
+
 		std::vector<cv::Mat> glow_blow_results(4);
 		for (int i = 0; i < 4; ++i) {
 			cv::Mat dst_rgba;
@@ -488,17 +879,20 @@ void glow_effect_video(const char* video_nm, std::string planFilePath) {
 				cv::cvtColor(dst_rgba, dst_rgba, cv::COLOR_BGR2RGBA);
 			glow_blow_results[i] = dst_rgba;
 		}
+
 		std::vector<cv::Mat> mipmap_results = triple_buffered_mipmap_pipeline(
 			resized_masks_batch, frame_width, frame_height, static_cast<float>(default_scale), param_KeyLevel
 		);
+
 		for (int i = 0; i < 4; ++i) {
 			cv::Mat final_result;
 			mix_images(original_frames[i], glow_blow_results[i], mipmap_results[i], final_result, param_KeyScale);
 			if (final_result.empty() || final_result.size().width <= 0 || final_result.size().height <= 0) {
-				std::cerr << "Warning: Final blended image is empty. Creating blank output." << std::endl;
+				std::cerr << "Warning: Final blended image is empty for final sub-batch 1 frame " << i
+					<< ". Creating blank output." << std::endl;
 				final_result = cv::Mat(defaultSize, CV_8UC4, cv::Scalar(0, 0, 0, 255));
 			}
-			cv::imshow("Processed Frame", final_result);
+			cv::imshow("Processed Frame (CUDA Graph)", final_result);
 			int key = cv::waitKey(30);
 			if (key == 'q') {
 				video.release();
@@ -507,11 +901,89 @@ void glow_effect_video(const char* video_nm, std::string planFilePath) {
 			}
 			output_video.write(final_result);
 		}
+
+		auto pp_end = std::chrono::high_resolution_clock::now();
+		post_processing_time += std::chrono::duration<double>(pp_end - pp_start).count();
+	}
+
+	if (segFutureValid2) {
+		auto pp_start = std::chrono::high_resolution_clock::now();
+
+		std::vector<cv::Mat> grayscale_masks = segFuture2.get();
+		std::vector<cv::Mat> resized_masks_batch;
+		for (int i = 4; i < 8; ++i) {
+			cv::Mat resized_mask;
+			cv::Size targetSize = (original_frames[i].empty() || original_frames[i].cols <= 0 || original_frames[i].rows <= 0)
+				? defaultSize : original_frames[i].size();
+			try {
+				cv::resize(grayscale_masks[i - 4], resized_mask, targetSize);
+			}
+			catch (cv::Exception& e) {
+				std::cerr << "Error during final segmentation mask resize for sub-batch 2 frame " << i - 4
+					<< ": " << e.what() << ". Using blank mask." << std::endl;
+				resized_mask = cv::Mat(targetSize, CV_8UC1, cv::Scalar(0));
+			}
+			resized_masks_batch.push_back(resized_mask);
+		}
+
+		std::vector<cv::Mat> glow_blow_results(4);
+		for (int i = 0; i < 4; ++i) {
+			cv::Mat dst_rgba;
+			glow_blow(resized_masks_batch[i], dst_rgba, param_KeyLevel, 10);
+			if (dst_rgba.channels() != 4)
+				cv::cvtColor(dst_rgba, dst_rgba, cv::COLOR_BGR2RGBA);
+			glow_blow_results[i] = dst_rgba;
+		}
+
+		std::vector<cv::Mat> mipmap_results = triple_buffered_mipmap_pipeline(
+			resized_masks_batch, frame_width, frame_height, static_cast<float>(default_scale), param_KeyLevel
+		);
+
+		for (int i = 0; i < 4; ++i) {
+			cv::Mat final_result;
+			mix_images(original_frames[i + 4], glow_blow_results[i], mipmap_results[i], final_result, param_KeyScale);
+			if (final_result.empty() || final_result.size().width <= 0 || final_result.size().height <= 0) {
+				std::cerr << "Warning: Final blended image is empty for final sub-batch 2 frame " << i
+					<< ". Creating blank output." << std::endl;
+				final_result = cv::Mat(defaultSize, CV_8UC4, cv::Scalar(0, 0, 0, 255));
+			}
+			cv::imshow("Processed Frame (CUDA Graph)", final_result);
+			int key = cv::waitKey(30);
+			if (key == 'q') {
+				video.release();
+				cv::destroyAllWindows();
+				goto cleanup;
+			}
+			output_video.write(final_result);
+		}
+
+		auto pp_end = std::chrono::high_resolution_clock::now();
+		post_processing_time += std::chrono::duration<double>(pp_end - pp_start).count();
 	}
 
 cleanup:
+	auto total_end = std::chrono::high_resolution_clock::now();
+	double total_time = std::chrono::duration<double>(total_end - total_start).count();
+
 	video.release();
 	output_video.release();
 	cv::destroyAllWindows();
-	std::cout << "Video processing completed. Saved to: " << output_video_path << std::endl;
+
+	// Output performance metrics
+	std::cout << "---------------------------------------------------" << std::endl;
+	std::cout << "CUDA Graph Video Processing Performance" << std::endl;
+	std::cout << "---------------------------------------------------" << std::endl;
+	std::cout << "Total frames processed: " << total_frames << std::endl;
+	std::cout << "Total processing time: " << total_time << " seconds" << std::endl;
+	if (total_frames > 0) {
+		std::cout << "Average time per frame: " << (total_time * 1000.0) / total_frames << " ms" << std::endl;
+		std::cout << "Effective frame rate: " << total_frames / total_time << " fps" << std::endl;
+	}
+	std::cout << "Segmentation time: " << segmentation_time << " seconds ("
+		<< (segmentation_time / total_time) * 100.0 << "%)" << std::endl;
+	std::cout << "Post-processing time: " << post_processing_time << " seconds ("
+		<< (post_processing_time / total_time) * 100.0 << "%)" << std::endl;
+	std::cout << "Video processing completed with CUDA Graph acceleration." << std::endl;
+	std::cout << "Saved to: " << output_video_path << std::endl;
+	std::cout << "---------------------------------------------------" << std::endl;
 }

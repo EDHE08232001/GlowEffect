@@ -1,4 +1,4 @@
-#ifndef MIPMAP_H
+ï»¿#ifndef MIPMAP_H
 #define MIPMAP_H
 
 #include <cuda_runtime.h>
@@ -24,7 +24,7 @@ void filter_mipmap(const int width, const int height, const float scale, const u
  *
  * This function performs the mipmap filtering operation asynchronously. It allocates a CUDA mipmapped array,
  * copies the source image into the array, generates the mipmap levels, and retrieves the filtered output into
- * a host buffer—all while using the provided CUDA stream. This allows overlapping data transfers with kernel execution.
+ * a host bufferï¿½all while using the provided CUDA stream. This allows overlapping data transfers with kernel execution.
  *
  * @param width   The width of the input image.
  * @param height  The height of the input image.
@@ -36,4 +36,3 @@ void filter_mipmap(const int width, const int height, const float scale, const u
 void filter_mipmap_async(const int width, const int height, const float scale, const uchar4* src_img, uchar4* dst_img, cudaStream_t stream);
 
 #endif // MIPMAP_H
-

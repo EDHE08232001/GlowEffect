@@ -1,4 +1,5 @@
 d:\csi4900\gloweffect\glow_effect\x64\release\mipmap.cu.obj
+d:\csi4900\gloweffect\glow_effect\x64\release\segmentation_kernels.cu.obj
 d:\csi4900\gloweffect\glow_effect\x64\release\vc142.pdb
 d:\csi4900\gloweffect\glow_effect\x64\release\dilate_erode.obj
 d:\csi4900\gloweffect\glow_effect\x64\release\wx_gui.obj
@@ -15,6 +16,7 @@ d:\csi4900\gloweffect\glow_effect\x64\release\glow_effect.exp
 d:\csi4900\gloweffect\glow_effect\x64\release\glow_effect.ipdb
 d:\csi4900\gloweffect\glow_effect\x64\release\glow_effect.iobj
 d:\csi4900\gloweffect\glow_effect\x64\release\mipmap.cu.cache
+d:\csi4900\gloweffect\glow_effect\x64\release\segmentation_kernels.cu.cache
 d:\csi4900\gloweffect\glow_effect\x64\release\glow_effect.device-link.obj
 d:\csi4900\gloweffect\glow_effect\x64\release\glow_effect.tlog\cudacompile.read.1u.tlog
 d:\csi4900\gloweffect\glow_effect\x64\release\glow_effect.tlog\cudacompile.write.1u.tlog

@@ -44,6 +44,19 @@ void glow_effect_image(const char* image_nm, const cv::Mat& grayscale_mask);
 void glow_effect_video(const char* video_nm, std::string planFilePath);
 
 /**
+ * @brief Applies a glow effect to a video file using CUDA Graph acceleration.
+ *
+ * This function maintains the same parallel processing approach as glow_effect_video,
+ * but enhances the segmentation phase with CUDA Graph technology to reduce kernel
+ * launch overhead and improve overall performance. The function processes frames in
+ * batches of 8, dividing them into two sub-batches of 4 frames each for parallel processing.
+ *
+ * @param video_nm     Path to the input video file.
+ * @param planFilePath Path to the TRT plan file.
+ */
+void glow_effect_video_graph(const char* video_nm, std::string planFilePath);
+
+/**
  * @brief Applies a "blow" (highlight) effect based on a grayscale mask.
  *
  * If any pixel in the input mask is within the specified tolerance (Delta) of

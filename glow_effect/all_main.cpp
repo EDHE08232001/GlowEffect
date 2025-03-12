@@ -267,8 +267,20 @@ int main() {
 				return 1;
 			}
 
+			// Ask user if they want to use CUDA Graph acceleration
+			std::string useGraphAcceleration;
+			printf("Use CUDA Graph acceleration for better performance? (y/n): ");
+			std::cin >> useGraphAcceleration;
+
 			try {
-				glow_effect_video(videoPath.c_str(), planFilePath);
+				if (useGraphAcceleration == "y" || useGraphAcceleration == "Y") {
+					std::cout << "Using CUDA Graph accelerated implementation..." << std::endl;
+					glow_effect_video_graph(videoPath.c_str(), planFilePath);
+				}
+				else {
+					std::cout << "Using standard implementation..." << std::endl;
+					glow_effect_video(videoPath.c_str(), planFilePath);
+				}
 			}
 			catch (const std::exception& e) {
 				std::cerr << "Error processing video: " << e.what() << std::endl;

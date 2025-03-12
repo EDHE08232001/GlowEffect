@@ -14,6 +14,7 @@
 #include <thread>
 #include <mutex>
 #include <iterator>
+#include "segmentation_kernels.h"
 
  //--------------------------------------------------------------------------
  // Measure Segmentation Inference (Single Image)
@@ -358,7 +359,9 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_mul_conc
 
 	std::cout << "STARTING measure_segmentation_trt_performance_mul_concurrent (multi-stream concurrent version)" << std::endl;
 
-	// Create runtime and deserialize the engine.
+	// -----------------------------
+	// Create TensorRT runtime and deserialize the engine from the plan file.
+	// -----------------------------
 	TRTGeneration::CustomLogger myLogger;
 	IRuntime* runtime = createInferRuntime(myLogger);
 	ifstream planFile(trt_plan, ios::binary);
@@ -369,35 +372,46 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_mul_conc
 		exit(EXIT_FAILURE);
 	}
 
-	// Determine the total number of images in the batch.
-	int totalBatch = img_tensor_batch.size(0);
-	int numThreads = 2;
-	int subBatch = (totalBatch + numThreads - 1) / numThreads;
+	// -----------------------------
+	// Determine batch and thread parameters.
+	// -----------------------------
+	int totalBatch = img_tensor_batch.size(0);  // Total number of images.
+	int numThreads = 2;                           // Fixed number of threads.
+	int subBatch = (totalBatch + numThreads - 1) / numThreads;  // Images per thread.
 
-	// allResults will hold the segmentation output for each image.
+	// allResults will store the segmentation output for each image.
 	std::vector<cv::Mat> allResults(totalBatch);
-	std::mutex resultMutex;
+	std::mutex resultMutex;  // Mutex to protect shared results vector.
 	std::vector<std::thread> threads;
 
+	// -----------------------------
+	// Launch threads to process sub-batches concurrently.
+	// -----------------------------
 	for (int t = 0; t < numThreads; ++t) {
 		threads.emplace_back([&, t]() {
+			// Create execution context for this thread.
 			IExecutionContext* context = engine->createExecutionContext();
 			if (!context) {
 				std::cerr << "Failed to create execution context for thread " << t << std::endl;
 				return;
 			}
+
+			// Create a CUDA stream with non-blocking flags.
 			cudaStream_t stream;
 			checkCudaErrors(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
 
+			// Calculate sub-batch indices for this thread.
 			int startIdx = t * subBatch;
 			int endIdx = std::min(startIdx + subBatch, totalBatch);
-			int validCount = endIdx - startIdx; // Number of valid images in this sub-batch.
+			int validCount = endIdx - startIdx;  // Number of valid images in this sub-batch.
 			if (validCount <= 0)
 				return;
 
-			// Slice the global tensor to get the sub-batch.
+			// -----------------------------
+			// Extract sub-batch from the global image tensor.
+			// -----------------------------
 			torch::Tensor subTensor = img_tensor_batch.slice(0, startIdx, endIdx);
-			// Remove any extra singleton dimension (e.g. [N,1,3,384,384] -> [N,3,384,384]).
+			// Remove extra singleton dimension if present (e.g., [N,1,3,384,384] -> [N,3,384,384]).
 			if ((subTensor.dim() == 5 && subTensor.size(1) == 1) ||
 				(subTensor.dim() == 4 && subTensor.size(1) == 1))
 			{
@@ -411,6 +425,9 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_mul_conc
 				subTensor = torch::cat({ subTensor, padTensor }, 0);
 			}
 
+			// -----------------------------
+			// Allocate host and device memory for input data.
+			// -----------------------------
 			int inputSize = subTensor.numel();
 			float* h_input = nullptr;
 			checkCudaErrors(cudaMallocHost((void**)&h_input, inputSize * sizeof(float)));
@@ -420,6 +437,7 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_mul_conc
 			checkCudaErrors(cudaMalloc(&d_input, inputSize * sizeof(float)));
 			checkCudaErrors(cudaMemcpyAsync(d_input, h_input, inputSize * sizeof(float), cudaMemcpyHostToDevice, stream));
 
+			// Set input dimensions for the context.
 			nvinfer1::Dims4 inputDims;
 			inputDims.d[0] = subTensor.size(0);
 			inputDims.d[1] = subTensor.size(1);
@@ -427,20 +445,23 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_mul_conc
 			inputDims.d[3] = subTensor.size(3);
 			context->setBindingDimensions(0, inputDims);
 
+			// -----------------------------
 			// Prepare output buffers.
+			// -----------------------------
 			std::vector<void*> bindings;
-			bindings.push_back(d_input);
+			bindings.push_back(d_input);  // Binding index 0: Input buffer.
 			int numBindings = engine->getNbBindings();
-			std::vector<float*> h_outputs;
-			std::vector<void*> d_outputs;
+			std::vector<float*> h_outputs;  // Host memory for outputs.
+			std::vector<void*> d_outputs;   // Device memory for outputs.
 			nvinfer1::Dims4 outputDims;
 			for (int i = 1; i < numBindings; ++i) {
+				// Retrieve binding dimensions for each output.
 				nvinfer1::Dims dims = context->getBindingDimensions(i);
 				outputDims.nbDims = dims.nbDims;
 				for (int j = 0; j < dims.nbDims; ++j) {
 					outputDims.d[j] = dims.d[j];
 					if (outputDims.d[j] < 0)
-						outputDims.d[j] = inputDims.d[j];
+						outputDims.d[j] = inputDims.d[j];  // Fallback to input dimensions if negative.
 				}
 				int outputSize = outputDims.d[0] * outputDims.d[1] * outputDims.d[2] * outputDims.d[3];
 				float* h_output = nullptr;
@@ -452,35 +473,51 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_mul_conc
 				bindings.push_back(d_output);
 			}
 
-			// Optional warm-up runs.
+			// -----------------------------
+			// Perform optional warm-up runs.
+			// -----------------------------
 			for (int i = 0; i < 3; ++i) {
 				context->enqueueV2(bindings.data(), stream, nullptr);
 			}
 
+			// -----------------------------
+			// Enqueue inference and check for errors.
+			// -----------------------------
 			if (!context->enqueueV2(bindings.data(), stream, nullptr)) {
 				std::cerr << "TensorRT enqueueV2 failed in thread " << t << std::endl;
 				exit(EXIT_FAILURE);
 			}
 
+			// -----------------------------
+			// Copy inference results from device to host.
+			// -----------------------------
 			int outSize = outputDims.d[0] * outputDims.d[1] * outputDims.d[2] * outputDims.d[3];
 			float* lastOutput = h_outputs.back();
 			checkCudaErrors(cudaMemcpyAsync(lastOutput, d_outputs.back(), outSize * sizeof(float), cudaMemcpyDeviceToHost, stream));
-			cudaStreamSynchronize(stream);
+			cudaStreamSynchronize(stream);  // Ensure all operations complete.
 
+			// -----------------------------
+			// Post-process the output tensor.
+			// -----------------------------
 			auto outputTensor = torch::from_blob(lastOutput, { outputDims.d[0], outputDims.d[1], outputDims.d[2], outputDims.d[3] }, torch::kFloat32);
-			auto maxOut = torch::max(outputTensor, 1);
-			auto segMask = std::get<1>(maxOut); // Expected shape: [4, H, W]
-			int scaleFactor = 255 / 21;
+			auto maxOut = torch::max(outputTensor, 1);  // Find maximum values along the channel dimension.
+			auto segMask = std::get<1>(maxOut);  // Expected shape: [4, H, W], where each element is the class index.
+			int scaleFactor = 255 / 21;  // Scale factor to map class indices to an 8-bit range.
 			auto imagePost = segMask * scaleFactor;
 
-			// Only use the first validCount outputs (the rest are padded).
+			// -----------------------------
+			// Convert tensor outputs to cv::Mat and handle padded outputs.
+			// -----------------------------
 			std::vector<cv::Mat> localResults;
 			for (int i = 0; i < validCount; ++i) {
-				auto single = imagePost[i].to(torch::kU8);
+				auto single = imagePost[i].to(torch::kU8);  // Convert to unsigned 8-bit.
 				cv::Mat result(single.size(0), single.size(1), CV_8UC1, single.data_ptr<uchar>());
 				localResults.push_back(result.clone());
 			}
 
+			// -----------------------------
+			// Safely update the global results vector.
+			// -----------------------------
 			{
 				std::lock_guard<std::mutex> lock(resultMutex);
 				for (int i = 0; i < validCount; ++i) {
@@ -488,7 +525,9 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_mul_conc
 				}
 			}
 
-			// Free allocated memory and resources.
+			// -----------------------------
+			// Free allocated host and device memory, destroy CUDA stream and context.
+			// -----------------------------
 			cudaFreeHost(h_input);
 			cudaFree(d_input);
 			for (auto ptr : h_outputs) {
@@ -502,15 +541,323 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_mul_conc
 			});
 	}
 
+	// Wait for all threads to complete execution.
 	for (auto& t : threads)
 		t.join();
 
+	// Destroy the engine and runtime to free resources.
 	engine->destroy();
 	runtime->destroy();
 
 	return allResults;
 }
 
+//--------------------------------------------------------------------------
+// Concurrent Segmentation with CUDA Graph
+//--------------------------------------------------------------------------
+std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_mul_concurrent_graph(const std::string& trt_plan, torch::Tensor img_tensor_batch, int num_trials) {
+
+	std::cout << "STARTING measure_segmentation_trt_performance_mul_concurrent_graph (Hybrid CUDA Graph approach)" << std::endl;
+
+	// Create TensorRT runtime and deserialize the engine
+	TRTGeneration::CustomLogger myLogger;
+	IRuntime* runtime = createInferRuntime(myLogger);
+	ifstream planFile(trt_plan, ios::binary);
+	vector<char> plan((istreambuf_iterator<char>(planFile)), istreambuf_iterator<char>());
+	std::cout << "Loaded engine size: " << plan.size() / (1024 * 1024) << " MiB" << std::endl;
+
+	auto start_time = std::chrono::high_resolution_clock::now();
+	ICudaEngine* engine = runtime->deserializeCudaEngine(plan.data(), plan.size());
+	auto end_time = std::chrono::high_resolution_clock::now();
+	auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
+	std::cout << "Deserialization required " << duration.count() << " microseconds." << std::endl;
+
+	if (!engine) {
+		std::cerr << "Failed to deserialize engine in graph segmentation." << std::endl;
+		exit(EXIT_FAILURE);
+	}
+
+	// Setup for multi-threaded processing
+	int totalBatch = img_tensor_batch.size(0);
+	int numThreads = 2;
+	int subBatch = (totalBatch + numThreads - 1) / numThreads;
+	std::vector<cv::Mat> allResults(totalBatch);
+	std::mutex resultMutex;
+	std::vector<std::thread> threads;
+
+	// Launch threads to process sub-batches concurrently
+	for (int t = 0; t < numThreads; ++t) {
+		threads.emplace_back([&, t]() {
+			// Create execution context for this thread
+			IExecutionContext* context = engine->createExecutionContext();
+			if (!context) {
+				std::cerr << "Failed to create execution context for thread " << t << std::endl;
+				return;
+			}
+
+			// Create three streams: one for pre-processing, one for inference, one for post-processing
+			cudaStream_t preStream, inferStream, postStream;
+			checkCudaErrors(cudaStreamCreateWithFlags(&preStream, cudaStreamNonBlocking));
+			checkCudaErrors(cudaStreamCreateWithFlags(&inferStream, cudaStreamNonBlocking));
+			checkCudaErrors(cudaStreamCreateWithFlags(&postStream, cudaStreamNonBlocking));
+
+			// Calculate sub-batch indices
+			int startIdx = t * subBatch;
+			int endIdx = std::min(startIdx + subBatch, totalBatch);
+			int validCount = endIdx - startIdx;
+			if (validCount <= 0)
+				return;
+
+			// Extract sub-batch from the global image tensor
+			torch::Tensor subTensor = img_tensor_batch.slice(0, startIdx, endIdx);
+
+			// Remove extra singleton dimensions if needed
+			if ((subTensor.dim() == 5 && subTensor.size(1) == 1) ||
+				(subTensor.dim() == 4 && subTensor.size(1) == 1))
+			{
+				subTensor = subTensor.squeeze(1);
+			}
+
+			// Pad the sub-batch to have exactly 4 images if needed
+			if (subTensor.size(0) < 4) {
+				int pad = 4 - subTensor.size(0);
+				torch::Tensor lastFrame = subTensor[subTensor.size(0) - 1].unsqueeze(0);
+				torch::Tensor padTensor = lastFrame.repeat({ pad, 1, 1, 1 });
+				subTensor = torch::cat({ subTensor, padTensor }, 0);
+			}
+
+			// Set input dimensions
+			nvinfer1::Dims4 inputDims;
+			inputDims.d[0] = subTensor.size(0);
+			inputDims.d[1] = subTensor.size(1);
+			inputDims.d[2] = subTensor.size(2);
+			inputDims.d[3] = subTensor.size(3);
+			context->setBindingDimensions(0, inputDims);
+
+			// Allocate memory for input and output
+			int inputSize = subTensor.numel();
+			float* h_input = nullptr;
+			void* d_input = nullptr;
+			checkCudaErrors(cudaMallocHost((void**)&h_input, inputSize * sizeof(float)));
+			checkCudaErrors(cudaMalloc(&d_input, inputSize * sizeof(float)));
+
+			// Copy input data to host pinned memory
+			std::memcpy(h_input, subTensor.data_ptr<float>(), inputSize * sizeof(float));
+
+			// Setup bindings and allocate output memory
+			std::vector<void*> bindings;
+			bindings.push_back(d_input);
+			int numBindings = engine->getNbBindings();
+			std::vector<float*> h_outputs;
+			std::vector<void*> d_outputs;
+			nvinfer1::Dims4 outputDims;
+
+			for (int i = 1; i < numBindings; ++i) {
+				nvinfer1::Dims dims = context->getBindingDimensions(i);
+				outputDims.nbDims = dims.nbDims;
+				for (int j = 0; j < dims.nbDims; ++j) {
+					outputDims.d[j] = dims.d[j];
+					if (outputDims.d[j] < 0)
+						outputDims.d[j] = inputDims.d[j];
+				}
+				int outputSize = outputDims.d[0] * outputDims.d[1] * outputDims.d[2] * outputDims.d[3];
+				float* h_output = nullptr;
+				void* d_output = nullptr;
+				checkCudaErrors(cudaMallocHost((void**)&h_output, outputSize * sizeof(float)));
+				checkCudaErrors(cudaMalloc(&d_output, outputSize * sizeof(float)));
+				h_outputs.push_back(h_output);
+				d_outputs.push_back(d_output);
+				bindings.push_back(d_output);
+			}
+
+			// Allocate device memory for post-processing
+			int batch = outputDims.d[0];
+			int height = outputDims.d[2];
+			int width = outputDims.d[3];
+			unsigned char* d_argmax_output = nullptr;
+			checkCudaErrors(cudaMalloc(&d_argmax_output, batch * height * width * sizeof(unsigned char)));
+
+			// Pre-processing: Copy input from host to device (not part of the graph)
+			checkCudaErrors(cudaMemcpyAsync(d_input, h_input, inputSize * sizeof(float),
+				cudaMemcpyHostToDevice, preStream));
+			checkCudaErrors(cudaStreamSynchronize(preStream));
+
+			// Setup timing
+			cudaEvent_t start, stop;
+			cudaEventCreate(&start);
+			cudaEventCreate(&stop);
+
+			// Declare graph objects outside the try block
+			cudaGraph_t postprocessGraph = nullptr;
+			cudaGraphExec_t postprocessGraphExec = nullptr;
+			bool useGraph = false;
+
+			// To fix the compilation error with goto, we'll declare the results vector here
+			std::vector<cv::Mat> localResults;
+			unsigned char* h_argmax_output = nullptr;
+
+			// First perform a regular inference run for warmup
+			// This is always done regardless of graph capture success
+			for (int i = 0; i < 2; ++i) {
+				// Run TensorRT inference
+				if (!context->enqueueV2(bindings.data(), inferStream, nullptr)) {
+					std::cerr << "TensorRT enqueueV2 failed during warmup" << std::endl;
+					goto cleanup; // Jump to resource cleanup
+				}
+				checkCudaErrors(cudaStreamSynchronize(inferStream));
+			}
+
+			// Now try to create a graph for post-processing operations
+			try {
+				// Create a graph for post-processing kernels
+				checkCudaErrors(cudaStreamBeginCapture(postStream, cudaStreamCaptureModeRelaxed));
+
+				// Call our custom kernel for argmax operation
+				launchArgmaxKernel(
+					static_cast<float*>(d_outputs.back()),
+					d_argmax_output,
+					batch,
+					outputDims.d[1], // num_classes
+					height,
+					width,
+					postStream
+				);
+
+				checkCudaErrors(cudaStreamEndCapture(postStream, &postprocessGraph));
+				checkCudaErrors(cudaGraphInstantiate(&postprocessGraphExec, postprocessGraph, nullptr, nullptr, 0));
+
+				// If we get here, graph capture for post-processing was successful
+				useGraph = true;
+				std::cout << "Thread " << t << " successfully created post-processing graph" << std::endl;
+			}
+			catch (const std::exception& e) {
+				std::cerr << "CUDA Graph capture failed: " << e.what() << std::endl;
+				std::cerr << "Falling back to regular execution..." << std::endl;
+				useGraph = false;
+
+				// Clean up any partial graph resources
+				if (postprocessGraph) {
+					cudaGraphDestroy(postprocessGraph);
+					postprocessGraph = nullptr;
+				}
+				if (postprocessGraphExec) {
+					cudaGraphExecDestroy(postprocessGraphExec);
+					postprocessGraphExec = nullptr;
+				}
+			}
+
+			// Execute inference timing
+			cudaEventRecord(start, inferStream);
+
+			// For TensorRT inference, we always use regular execution since it's not compatible with graph capture
+			if (!context->enqueueV2(bindings.data(), inferStream, nullptr)) {
+				std::cerr << "TensorRT enqueueV2 failed" << std::endl;
+				goto cleanup; // Jump to resource cleanup
+			}
+			checkCudaErrors(cudaStreamSynchronize(inferStream));
+
+			// Execute post-processing (either with graph or regular method)
+			if (useGraph && postprocessGraphExec) {
+				checkCudaErrors(cudaGraphLaunch(postprocessGraphExec, postStream));
+				checkCudaErrors(cudaStreamSynchronize(postStream));
+			}
+			else {
+				// Fall back to regular kernel launch if graph capture failed
+				launchArgmaxKernel(
+					static_cast<float*>(d_outputs.back()),
+					d_argmax_output,
+					batch,
+					outputDims.d[1], // num_classes
+					height,
+					width,
+					postStream
+				);
+				checkCudaErrors(cudaStreamSynchronize(postStream));
+			}
+
+			// Copy results from device to host
+			h_argmax_output = new unsigned char[batch * height * width];
+			checkCudaErrors(cudaMemcpyAsync(
+				h_argmax_output,
+				d_argmax_output,
+				batch * height * width * sizeof(unsigned char),
+				cudaMemcpyDeviceToHost,
+				postStream
+			));
+			checkCudaErrors(cudaStreamSynchronize(postStream));
+
+			cudaEventRecord(stop, inferStream);
+			checkCudaErrors(cudaStreamSynchronize(inferStream));
+
+			float milliseconds = 0;
+			cudaEventElapsedTime(&milliseconds, start, stop);
+			std::cout << "Thread " << t << " execution time: " << milliseconds << " ms"
+				<< (useGraph ? " (with partial CUDA Graph)" : " (without CUDA Graph)") << std::endl;
+
+			// Convert to OpenCV Mats and update results
+			for (int i = 0; i < validCount; ++i) {
+				cv::Mat result(height, width, CV_8UC1);
+				// Copy the segmentation result for this batch item
+				std::memcpy(
+					result.data,
+					h_argmax_output + (i * height * width),
+					height * width * sizeof(unsigned char)
+				);
+				localResults.push_back(result.clone());
+			}
+
+			// Update shared results vector with thread-local results
+			{
+				std::lock_guard<std::mutex> lock(resultMutex);
+				for (int i = 0; i < validCount; ++i) {
+					allResults[startIdx + i] = localResults[i];
+				}
+			}
+
+		cleanup:
+			// Clean up temporary host memory
+			if (h_argmax_output) {
+				delete[] h_argmax_output;
+			}
+
+			// Clean up resources
+			cudaEventDestroy(start);
+			cudaEventDestroy(stop);
+
+			if (postprocessGraphExec) {
+				cudaGraphExecDestroy(postprocessGraphExec);
+			}
+			if (postprocessGraph) {
+				cudaGraphDestroy(postprocessGraph);
+			}
+
+			cudaFree(d_argmax_output);
+			cudaFreeHost(h_input);
+			cudaFree(d_input);
+			for (auto ptr : h_outputs) {
+				cudaFreeHost(ptr);
+			}
+			for (auto dptr : d_outputs) {
+				cudaFree(dptr);
+			}
+			cudaStreamDestroy(preStream);
+			cudaStreamDestroy(inferStream);
+			cudaStreamDestroy(postStream);
+			context->destroy();
+			});
+	}
+
+	// Wait for all threads to complete
+	for (auto& t : threads) {
+		t.join();
+	}
+
+	// Clean up global resources
+	engine->destroy();
+	runtime->destroy();
+
+	return allResults;
+}
 
 //--------------------------------------------------------------------------
 // Measure Super-Resolution Inference
