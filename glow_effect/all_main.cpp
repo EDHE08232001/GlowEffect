@@ -238,53 +238,106 @@ int main() {
 		}
 		else if (userInput == "video" || userInput == "v") {
 			std::string videoPath;
-			std::string videoInputOption;
+			std::string planTypeOption;
 
-			printf("Do you want to use default input video path? (y/n): ");
-			std::cin >> videoInputOption;
+			// First ask which TRT plan to use (single-batch or multi-batch)
+			printf("Which TensorRT plan would you like to use?\n");
+			printf("1. Single-batch plan (MobileOneS4)\n");
+			printf("2. Multi-batch plan (default)\n");
+			printf("Enter your choice (1/2): ");
+			std::cin >> planTypeOption;
 
-			// Choose default path or a customized path.
-			if (videoInputOption == "y") {
-				videoPath = "D:/csi4900/VideoInputs/racing_cars.sd.mp4"; // Use your own default path.
-			}
-			else {
-				printf("Enter the full path of the video file: ");
-				std::cin >> videoPath;
-			}
+			if (planTypeOption == "1") {
+				// Single-batch plan selected
+				std::string singleBatchPlanPath = "D:/csi4900/TRT-Plans/mobileones4_1.edhe.plan";
+				std::string videoInputOption;
 
-			if (videoPath.empty()) {
-				std::cout << "videoPath cannot be empty" << std::endl;
-				return 1;
-			}
+				printf("Do you want to use default input video path? (y/n): ");
+				std::cin >> videoInputOption;
 
-			if (!std::filesystem::exists(videoPath)) {
-				std::cout << "The specified file path does not exist." << std::endl;
-				return 1;
-			}
-
-			if (!std::filesystem::is_regular_file(videoPath)) {
-				std::cout << "The specified path is not a valid file." << std::endl;
-				return 1;
-			}
-
-			// Ask user if they want to use CUDA Graph acceleration
-			std::string useGraphAcceleration;
-			printf("Use CUDA Graph acceleration for better performance? (y/n): ");
-			std::cin >> useGraphAcceleration;
-
-			try {
-				if (useGraphAcceleration == "y" || useGraphAcceleration == "Y") {
-					std::cout << "Using CUDA Graph accelerated implementation..." << std::endl;
-					glow_effect_video_graph(videoPath.c_str(), planFilePath);
+				// Choose default path or a customized path
+				if (videoInputOption == "y") {
+					videoPath = "D:/csi4900/VideoInputs/racing_cars.sd.mp4"; // Use your own default path
 				}
 				else {
-					std::cout << "Using standard implementation..." << std::endl;
-					glow_effect_video(videoPath.c_str(), planFilePath);
+					printf("Enter the full path of the video file: ");
+					std::cin >> videoPath;
+				}
+
+				if (videoPath.empty()) {
+					std::cout << "videoPath cannot be empty" << std::endl;
+					return 1;
+				}
+
+				if (!std::filesystem::exists(videoPath)) {
+					std::cout << "The specified file path does not exist." << std::endl;
+					return 1;
+				}
+
+				if (!std::filesystem::is_regular_file(videoPath)) {
+					std::cout << "The specified path is not a valid file." << std::endl;
+					return 1;
+				}
+
+				try {
+					std::cout << "Using single-batch parallel processing for MobileOneS4..." << std::endl;
+					glow_effect_video_single_batch_parallel(videoPath.c_str(), singleBatchPlanPath);
+				}
+				catch (const std::exception& e) {
+					std::cerr << "Error processing video: " << e.what() << std::endl;
+					return -1;
 				}
 			}
-			catch (const std::exception& e) {
-				std::cerr << "Error processing video: " << e.what() << std::endl;
-				return -1;
+			else {
+				// Multi-batch plan selected (default)
+				std::string videoInputOption;
+
+				printf("Do you want to use default input video path? (y/n): ");
+				std::cin >> videoInputOption;
+
+				// Choose default path or a customized path
+				if (videoInputOption == "y") {
+					videoPath = "D:/csi4900/VideoInputs/racing_cars.sd.mp4"; // Use your own default path
+				}
+				else {
+					printf("Enter the full path of the video file: ");
+					std::cin >> videoPath;
+				}
+
+				if (videoPath.empty()) {
+					std::cout << "videoPath cannot be empty" << std::endl;
+					return 1;
+				}
+
+				if (!std::filesystem::exists(videoPath)) {
+					std::cout << "The specified file path does not exist." << std::endl;
+					return 1;
+				}
+
+				if (!std::filesystem::is_regular_file(videoPath)) {
+					std::cout << "The specified path is not a valid file." << std::endl;
+					return 1;
+				}
+
+				// Ask user if they want to use CUDA Graph acceleration
+				std::string useGraphAcceleration;
+				printf("Use CUDA Graph acceleration for better performance? (y/n): ");
+				std::cin >> useGraphAcceleration;
+
+				try {
+					if (useGraphAcceleration == "y" || useGraphAcceleration == "Y") {
+						std::cout << "Using CUDA Graph accelerated implementation..." << std::endl;
+						glow_effect_video_graph(videoPath.c_str(), planFilePath);
+					}
+					else {
+						std::cout << "Using standard implementation..." << std::endl;
+						glow_effect_video(videoPath.c_str(), planFilePath);
+					}
+				}
+				catch (const std::exception& e) {
+					std::cerr << "Error processing video: " << e.what() << std::endl;
+					return -1;
+				}
 			}
 		}
 		else {

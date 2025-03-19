@@ -107,6 +107,23 @@ public:
 	 * @return A vector of OpenCV Mats, each representing a grayscale segmentation map.
 	 */
 	static std::vector<cv::Mat> measure_segmentation_trt_performance_mul_concurrent_graph(const std::string& trt_plan, torch::Tensor img_tensor_batch, int num_trials);
+
+	/**
+	 * @brief Processes multiple images in parallel using a single-batch TRT model
+	 *
+	 * This implementation maximizes parallelism for single-batch TensorRT models by:
+	 * 1. Creating multiple execution contexts and CUDA streams (one per worker thread)
+	 * 2. Processing images independently and concurrently
+	 * 3. Using CUDA Graphs for post-processing operations only (argmax kernel)
+	 * 4. Properly separating inference streams from post-processing streams
+	 * 5. Implementing robust error handling and recovery mechanisms
+	 *
+	 * @param trt_plan Path to the single-batch TensorRT plan file
+	 * @param img_tensors Vector of individual image tensors (each with batch_size=1)
+	 * @param num_streams Number of parallel streams to use
+	 * @return Vector of segmentation mask images
+	 */
+	static std::vector<cv::Mat> measure_segmentation_trt_performance_single_batch_parallel(const std::string& trt_plan, const std::vector<torch::Tensor>& img_tensors, int num_streams);
 };
 
 #endif // TRT_INFERENCE_HPP

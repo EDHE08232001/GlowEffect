@@ -987,3 +987,273 @@ cleanup:
 	std::cout << "Saved to: " << output_video_path << std::endl;
 	std::cout << "---------------------------------------------------" << std::endl;
 }
+
+/**
+ * @brief Applies a glow effect to video using parallel processing of single-batch TRT model
+ *
+ * This function processes video frames in parallel using multiple streams and the
+ * single-batch TensorRT model. It employs the updated TRTInference that correctly
+ * handles CUDA Graph capture for post-processing operations.
+ *
+ * The function maintains the same glow/bloom effect pipeline but organizes the processing
+ * for optimal parallel execution with proper error handling.
+ *
+ * @param video_nm Path to the input video file
+ * @param planFilePath Path to the single-batch TensorRT plan file
+ */
+void glow_effect_video_single_batch_parallel(const char* video_nm, std::string planFilePath) {
+	std::cout << "Starting glow effect video processing with optimized single-batch parallel execution" << std::endl;
+
+	// Performance timing
+	auto total_start = std::chrono::high_resolution_clock::now();
+
+	// Output OpenCV build information
+	cv::String info = cv::getBuildInformation();
+	std::cout << info << std::endl;
+
+	// Open video
+	cv::VideoCapture video;
+	if (!video.open(video_nm, cv::VideoCaptureAPIs::CAP_ANY)) {
+		std::cerr << "Error: Could not open video file: " << video_nm << std::endl;
+		return;
+	}
+
+	// Get video properties
+	int frame_width = static_cast<int>(video.get(cv::CAP_PROP_FRAME_WIDTH));
+	int frame_height = static_cast<int>(video.get(cv::CAP_PROP_FRAME_HEIGHT));
+	int fps = static_cast<int>(video.get(cv::CAP_PROP_FPS));
+
+	cv::Size defaultSize((frame_width > 0) ? frame_width : 640, (frame_height > 0) ? frame_height : 360);
+
+	// Create output directory if needed
+	if (!fs::exists("./VideoOutput/")) {
+		if (fs::create_directory("./VideoOutput/"))
+			std::cout << "Video Output Directory successfully created." << std::endl;
+		else {
+			std::cerr << "Failed to create video output folder." << std::endl;
+			return;
+		}
+	}
+
+	// Create output video writer
+	std::string output_video_path = "./VideoOutput/processed_video_single_batch_parallel.avi";
+	cv::VideoWriter output_video(output_video_path,
+		cv::VideoWriter::fourcc('M', 'J', 'P', 'G'),
+		fps, cv::Size((frame_width > 0) ? frame_width : defaultSize.width,
+			(frame_height > 0) ? frame_height : defaultSize.height));
+
+	if (!output_video.isOpened()) {
+		std::cerr << "Error: Could not open the output video for writing: " << output_video_path << std::endl;
+		return;
+	}
+
+	// Performance metrics
+	int total_frames = 0;
+	double segmentation_time = 0.0;
+	double post_processing_time = 0.0;
+
+	// Number of parallel streams to use
+	const int NUM_PARALLEL_STREAMS = 4;
+
+	// Main processing loop
+	cv::cuda::GpuMat gpu_frame;
+	std::vector<cv::Mat> original_frames;
+	std::vector<torch::Tensor> frame_tensors;
+
+	bool processing = true;
+	int batch_count = 0;
+
+	while (processing) {
+		batch_count++;
+		std::cout << "Processing batch " << batch_count << std::endl;
+
+		// Clear containers for this batch
+		original_frames.clear();
+		frame_tensors.clear();
+
+		// Read a batch of frames (one for each parallel stream)
+		for (int i = 0; i < NUM_PARALLEL_STREAMS; ++i) {
+			cv::Mat frame;
+			if (!video.read(frame) || frame.empty()) {
+				if (i == 0) {
+					// No more frames to process
+					processing = false;
+					break;
+				}
+				// If we have some frames but not enough to fill all streams,
+				// duplicate the last valid frame
+				if (!original_frames.empty()) {
+					frame_tensors.push_back(frame_tensors.back().clone());
+					original_frames.push_back(original_frames.back().clone());
+				}
+				continue;
+			}
+
+			total_frames++;
+
+			// Handle invalid frames
+			if (frame.empty() || frame.cols <= 0 || frame.rows <= 0) {
+				std::cerr << "Warning: Read frame " << i << " is invalid. Using default blank image." << std::endl;
+				frame = cv::Mat(defaultSize, CV_8UC3, cv::Scalar(0, 0, 0));
+			}
+
+			original_frames.push_back(frame.clone());
+
+			try {
+				// Preprocess frame for TensorRT
+				gpu_frame.upload(frame);
+				cv::cuda::GpuMat resized_gpu_frame;
+
+				try {
+					cv::cuda::resize(gpu_frame, resized_gpu_frame, cv::Size(384, 384));
+				}
+				catch (cv::Exception& e) {
+					std::cerr << "Error during GPU resize: " << e.what() << ". Using blank image instead." << std::endl;
+					cv::Mat blank(384, 384, frame.type(), cv::Scalar(0, 0, 0));
+					resized_gpu_frame.upload(blank);
+				}
+
+				torch::Tensor frame_tensor = ImageProcessingUtil::process_img(resized_gpu_frame, false);
+				frame_tensor = frame_tensor.to(torch::kFloat);
+
+				// Make sure tensor has batch dimension of 1
+				if (frame_tensor.dim() == 3) {
+					frame_tensor = frame_tensor.unsqueeze(0);
+				}
+
+				frame_tensors.push_back(frame_tensor);
+			}
+			catch (const std::exception& e) {
+				std::cerr << "Error preprocessing frame " << i << ": " << e.what() << std::endl;
+				// Create a dummy tensor with the right shape
+				torch::Tensor dummy_tensor = torch::zeros({ 1, 3, 384, 384 }, torch::kFloat);
+				frame_tensors.push_back(dummy_tensor);
+			}
+		}
+
+		if (!processing || frame_tensors.empty()) {
+			break;
+		}
+
+		// Measure segmentation time
+		auto seg_start = std::chrono::high_resolution_clock::now();
+
+		// Run segmentation in parallel using the updated function that properly handles CUDA Graphs
+		std::vector<cv::Mat> segmentation_masks;
+		try {
+			segmentation_masks = TRTInference::measure_segmentation_trt_performance_single_batch_parallel(
+				planFilePath, frame_tensors, NUM_PARALLEL_STREAMS);
+		}
+		catch (const std::exception& e) {
+			std::cerr << "Error in segmentation inference: " << e.what() << std::endl;
+			// Create empty masks to continue processing
+			segmentation_masks.resize(frame_tensors.size());
+			for (size_t i = 0; i < frame_tensors.size(); ++i) {
+				segmentation_masks[i] = cv::Mat(384, 384, CV_8UC1, cv::Scalar(0));
+			}
+		}
+
+		auto seg_end = std::chrono::high_resolution_clock::now();
+		segmentation_time += std::chrono::duration<double>(seg_end - seg_start).count();
+
+		// Post-process each frame
+		auto pp_start = std::chrono::high_resolution_clock::now();
+
+		for (size_t i = 0; i < segmentation_masks.size() && i < original_frames.size(); ++i) {
+			try {
+				// Resize segmentation mask to match original frame size
+				cv::Mat resized_mask;
+				cv::Size targetSize = (original_frames[i].empty() || original_frames[i].cols <= 0 || original_frames[i].rows <= 0)
+					? defaultSize : original_frames[i].size();
+
+				try {
+					// Handle empty or invalid masks
+					if (segmentation_masks[i].empty() || segmentation_masks[i].cols <= 0 || segmentation_masks[i].rows <= 0) {
+						resized_mask = cv::Mat(targetSize, CV_8UC1, cv::Scalar(0));
+					}
+					else {
+						cv::resize(segmentation_masks[i], resized_mask, targetSize);
+					}
+				}
+				catch (cv::Exception& e) {
+					std::cerr << "Error during segmentation mask resize: " << e.what() << ". Using blank mask." << std::endl;
+					resized_mask = cv::Mat(targetSize, CV_8UC1, cv::Scalar(0));
+				}
+
+				// Apply glow blow effect
+				cv::Mat dst_rgba;
+				glow_blow(resized_mask, dst_rgba, param_KeyLevel, 10);
+				if (dst_rgba.channels() != 4) {
+					cv::cvtColor(dst_rgba, dst_rgba, cv::COLOR_BGR2RGBA);
+				}
+
+				// Apply mipmap effect
+				cv::Mat mipmap_result;
+				apply_mipmap(resized_mask, mipmap_result, static_cast<float>(default_scale), param_KeyLevel);
+
+				// Blend original, glow, and mipmap
+				cv::Mat final_result;
+				mix_images(original_frames[i], dst_rgba, mipmap_result, final_result, param_KeyScale);
+
+				// Handle empty result
+				if (final_result.empty() || final_result.size().width <= 0 || final_result.size().height <= 0) {
+					std::cerr << "Warning: Final blended image is empty for frame " << i
+						<< ". Creating blank output." << std::endl;
+					final_result = cv::Mat(defaultSize, CV_8UC4, cv::Scalar(0, 0, 0, 255));
+				}
+
+				// Display and write frame
+				cv::imshow("Processed Frame (Single-Batch Parallel)", final_result);
+				int key = cv::waitKey(30);
+				if (key == 'q') {
+					processing = false;
+					break;
+				}
+
+				output_video.write(final_result);
+			}
+			catch (const std::exception& e) {
+				std::cerr << "Error processing frame " << i << ": " << e.what() << std::endl;
+				// Create a blank output frame and continue
+				cv::Mat blank_output = cv::Mat(defaultSize, CV_8UC4, cv::Scalar(0, 0, 0, 255));
+				output_video.write(blank_output);
+				cv::imshow("Processed Frame (Single-Batch Parallel)", blank_output);
+				cv::waitKey(30);
+			}
+		}
+
+		auto pp_end = std::chrono::high_resolution_clock::now();
+		post_processing_time += std::chrono::duration<double>(pp_end - pp_start).count();
+
+		// Report progress
+		std::cout << "Completed batch " << batch_count << " (" << original_frames.size()
+			<< " frames, total: " << total_frames << ")" << std::endl;
+	}
+
+	// Calculate and display performance metrics
+	auto total_end = std::chrono::high_resolution_clock::now();
+	double total_time = std::chrono::duration<double>(total_end - total_start).count();
+
+	// Clean up
+	video.release();
+	output_video.release();
+	cv::destroyAllWindows();
+
+	// Output performance metrics
+	std::cout << "---------------------------------------------------" << std::endl;
+	std::cout << "Single-Batch Parallel Video Processing Performance" << std::endl;
+	std::cout << "---------------------------------------------------" << std::endl;
+	std::cout << "Total frames processed: " << total_frames << std::endl;
+	std::cout << "Total processing time: " << total_time << " seconds" << std::endl;
+	if (total_frames > 0) {
+		std::cout << "Average time per frame: " << (total_time * 1000.0) / total_frames << " ms" << std::endl;
+		std::cout << "Effective frame rate: " << total_frames / total_time << " fps" << std::endl;
+	}
+	std::cout << "Segmentation time: " << segmentation_time << " seconds ("
+		<< (segmentation_time / total_time) * 100.0 << "%)" << std::endl;
+	std::cout << "Post-processing time: " << post_processing_time << " seconds ("
+		<< (post_processing_time / total_time) * 100.0 << "%)" << std::endl;
+	std::cout << "Video processing completed with optimized Single-Batch Parallel acceleration." << std::endl;
+	std::cout << "Saved to: " << output_video_path << std::endl;
+	std::cout << "---------------------------------------------------" << std::endl;
+}

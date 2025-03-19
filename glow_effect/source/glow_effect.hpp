@@ -57,6 +57,21 @@ void glow_effect_video(const char* video_nm, std::string planFilePath);
 void glow_effect_video_graph(const char* video_nm, std::string planFilePath);
 
 /**
+ * @brief Applies a glow effect to video using parallel processing of single-batch TRT model
+ *
+ * This function processes video frames in parallel using multiple streams and the
+ * single-batch TensorRT model. It employs the updated TRTInference that correctly
+ * handles CUDA Graph capture for post-processing operations.
+ *
+ * The function maintains the same glow/bloom effect pipeline but organizes the processing
+ * for optimal parallel execution with proper error handling.
+ *
+ * @param video_nm Path to the input video file
+ * @param planFilePath Path to the single-batch TensorRT plan file
+ */
+void glow_effect_video_single_batch_parallel(const char* video_nm, std::string planFilePath);
+
+/**
  * @brief Applies a "blow" (highlight) effect based on a grayscale mask.
  *
  * If any pixel in the input mask is within the specified tolerance (Delta) of
