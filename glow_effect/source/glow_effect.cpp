@@ -37,6 +37,36 @@ namespace fs = std::filesystem;
 // Global boolean array indicating button states (for demonstration/testing).
 bool button_State[5] = { false, false, false, false, false };
 
+// Helper Visualization
+void visualize_segmentation_regions(const cv::Mat& original_frame, const cv::Mat& mask, int param_KeyLevel, int Delta) {
+	// Create a visualization image by blending original frame with colored regions
+	cv::Mat visualization;
+	if (original_frame.channels() == 3) {
+		visualization = original_frame.clone();
+	}
+	else {
+		cv::cvtColor(original_frame, visualization, cv::COLOR_BGRA2BGR);
+	}
+
+	// Apply a colored overlay to matched regions
+	for (int i = 0; i < mask.rows; ++i) {
+		for (int j = 0; j < mask.cols; ++j) {
+			int mask_pixel = mask.at<uchar>(i, j);
+			if (std::abs(mask_pixel - param_KeyLevel) < Delta) {
+				// Draw a bright cyan highlight
+				cv::Vec3b& pixel = visualization.at<cv::Vec3b>(i, j);
+				// Blend with original (50% original, 50% highlight)
+				pixel[0] = pixel[0] * 0.5 + 255 * 0.5; // B
+				pixel[1] = pixel[1] * 0.5 + 255 * 0.5; // G
+				pixel[2] = pixel[2] * 0.5;             // R
+			}
+		}
+	}
+
+	// Show the visualization
+	cv::imshow("Segmentation Visualization", visualization);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Helper Function: convert_mask_to_rgba_buffer
 ////////////////////////////////////////////////////////////////////////////////
@@ -108,6 +138,9 @@ std::vector<cv::Mat> triple_buffered_mipmap_pipeline(const std::vector<cv::Mat>&
 ////////////////////////////////////////////////////////////////////////////////
 // Function: glow_blow
 ////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+// Function: glow_blow
+////////////////////////////////////////////////////////////////////////////////
 void glow_blow(const cv::Mat& mask, cv::Mat& dst_rgba, int param_KeyLevel, int Delta) {
 	if (mask.empty()) {
 		std::cerr << "Error: Segmentation mask is empty." << std::endl;
@@ -118,32 +151,48 @@ void glow_blow(const cv::Mat& mask, cv::Mat& dst_rgba, int param_KeyLevel, int D
 		return;
 	}
 
+	// Create a destination image with zeros
 	dst_rgba = cv::Mat::zeros(mask.size(), CV_8UC4);
-	cv::Vec4b overlay_color = { 199, 170, 255, 255 };
-	bool has_target_region = false;
 
+	// Use a more vibrant color for better visibility
+	cv::Vec4b overlay_color = { 128, 0, 128, 255 };
+
+	// Variables to track target region information
+	bool has_target_region = false;
+	int target_pixel_count = 0;
+	int min_x = mask.cols, max_x = 0;
+	int min_y = mask.rows, max_y = 0;
+
+	// Process the mask
 	for (int i = 0; i < mask.rows; ++i) {
 		for (int j = 0; j < mask.cols; ++j) {
 			int mask_pixel = mask.at<uchar>(i, j);
+
 			if (std::abs(mask_pixel - param_KeyLevel) < Delta) {
 				has_target_region = true;
-				break;
-			}
-		}
-		if (has_target_region)
-			break;
-	}
+				target_pixel_count++;
 
-	if (has_target_region) {
-		for (int i = 0; i < dst_rgba.rows; ++i) {
-			for (int j = 0; j < dst_rgba.cols; ++j) {
+				// Track bounding box of target region
+				min_x = std::min(min_x, j);
+				max_x = std::max(max_x, j);
+				min_y = std::min(min_y, i);
+				max_y = std::max(max_y, i);
+
+				// Apply overlay ONLY to pixels that match the target value
 				dst_rgba.at<cv::Vec4b>(i, j) = overlay_color;
 			}
 		}
 	}
 
-	std::cout << "glow_blow completed. Target region "
-		<< (has_target_region ? "found and applied." : "not found.") << std::endl;
+	// Print the target region information that was specifically requested
+	if (has_target_region) {
+		// Calculate percentage of frame covered
+		double coverage_percent = (static_cast<double>(target_pixel_count) / (mask.rows * mask.cols)) * 100.0;
+		std::cout << "Target region found!" << std::endl;
+		std::cout << "  - Pixels matching target: " << target_pixel_count << " (" << coverage_percent << "% of frame)" << std::endl;
+		std::cout << "  - Region bounding box: (" << min_x << "," << min_y << ") to (" << max_x << "," << max_y << ")" << std::endl;
+		std::cout << "  - Box dimensions: " << (max_x - min_x + 1) << "x" << (max_y - min_y + 1) << std::endl;
+	}
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -268,6 +317,7 @@ void mix_images(const cv::Mat& src_img, const cv::Mat& dst_rgba, const cv::Mat& 
 
 	std::cout << "mix_images: Image blending completed successfully." << std::endl;
 }
+
 
 ////////////////////////////////////////////////////////////////////////////////
 // Function: glow_effect_image
@@ -989,20 +1039,24 @@ cleanup:
 }
 
 /**
- * @brief Applies a glow effect to video using parallel processing of single-batch TRT model
+ * @brief Applies a glow effect to video processing only the exact specified pixel value
  *
- * This function processes video frames in parallel using multiple streams and the
- * single-batch TensorRT model. It employs the updated TRTInference that correctly
- * handles CUDA Graph capture for post-processing operations.
- *
- * The function maintains the same glow/bloom effect pipeline but organizes the processing
- * for optimal parallel execution with proper error handling.
+ * This modified function focuses on detecting a single, specific segmentation value
+ * without using a broad delta range. The precise segmentation value is set at the
+ * beginning of the function.
  *
  * @param video_nm Path to the input video file
  * @param planFilePath Path to the single-batch TensorRT plan file
  */
 void glow_effect_video_single_batch_parallel(const char* video_nm, std::string planFilePath) {
-	std::cout << "Starting glow effect video processing with optimized single-batch parallel execution" << std::endl;
+	std::cout << "Starting glow effect video processing with single value detection and triple buffering" << std::endl;
+
+	// *** SET YOUR SPECIFIC TARGET VALUE HERE ***
+	param_KeyLevel = 50;  // Change this to your desired segmentation class value
+	param_KeyScale = 1000; // Ensure we have proper intensity set for blending
+
+	// Set to 0 for exact matching only, or a small value (1-2) for minimal tolerance
+	const int EXACT_DETECTION_DELTA = 20;
 
 	// Performance timing
 	auto total_start = std::chrono::high_resolution_clock::now();
@@ -1036,7 +1090,7 @@ void glow_effect_video_single_batch_parallel(const char* video_nm, std::string p
 	}
 
 	// Create output video writer
-	std::string output_video_path = "./VideoOutput/processed_video_single_batch_parallel.avi";
+	std::string output_video_path = "./VideoOutput/processed_video_single_value_triple_buffered.avi";
 	cv::VideoWriter output_video(output_video_path,
 		cv::VideoWriter::fourcc('M', 'J', 'P', 'G'),
 		fps, cv::Size((frame_width > 0) ? frame_width : defaultSize.width,
@@ -1051,6 +1105,7 @@ void glow_effect_video_single_batch_parallel(const char* video_nm, std::string p
 	int total_frames = 0;
 	double segmentation_time = 0.0;
 	double post_processing_time = 0.0;
+	double mipmap_time = 0.0;
 
 	// Number of parallel streams to use
 	const int NUM_PARALLEL_STREAMS = 4;
@@ -1062,6 +1117,15 @@ void glow_effect_video_single_batch_parallel(const char* video_nm, std::string p
 
 	bool processing = true;
 	int batch_count = 0;
+
+	// Create new diagnostic windows
+	cv::namedWindow("Segmentation Mask", cv::WINDOW_NORMAL);
+	cv::namedWindow("Segmentation Visualization", cv::WINDOW_NORMAL);
+	cv::namedWindow("Glow Overlay", cv::WINDOW_NORMAL);
+	cv::namedWindow("Mipmap Result", cv::WINDOW_NORMAL);
+	cv::namedWindow("Before-After Comparison", cv::WINDOW_NORMAL);
+
+	std::cout << "TARGET VALUE: " << param_KeyLevel << " (using delta: " << EXACT_DETECTION_DELTA << ")" << std::endl;
 
 	while (processing) {
 		batch_count++;
@@ -1156,9 +1220,14 @@ void glow_effect_video_single_batch_parallel(const char* video_nm, std::string p
 		auto seg_end = std::chrono::high_resolution_clock::now();
 		segmentation_time += std::chrono::duration<double>(seg_end - seg_start).count();
 
-		// Post-process each frame
+		// Post-process each frame - first prepare all masks
 		auto pp_start = std::chrono::high_resolution_clock::now();
 
+		// Vector to hold all resized masks for the batch
+		std::vector<cv::Mat> resized_masks_batch;
+		std::vector<cv::Mat> glow_blow_results;
+
+		// First pass: resize masks and apply glow_blow
 		for (size_t i = 0; i < segmentation_masks.size() && i < original_frames.size(); ++i) {
 			try {
 				// Resize segmentation mask to match original frame size
@@ -1180,20 +1249,98 @@ void glow_effect_video_single_batch_parallel(const char* video_nm, std::string p
 					resized_mask = cv::Mat(targetSize, CV_8UC1, cv::Scalar(0));
 				}
 
-				// Apply glow blow effect
-				cv::Mat dst_rgba;
-				glow_blow(resized_mask, dst_rgba, param_KeyLevel, 10);
-				if (dst_rgba.channels() != 4) {
-					cv::cvtColor(dst_rgba, dst_rgba, cv::COLOR_BGR2RGBA);
+				// Store the resized mask for triple buffered mipmap processing
+				resized_masks_batch.push_back(resized_mask);
+
+				// Create visualization of the mask for display
+				cv::Mat exact_value_mask = cv::Mat::zeros(resized_mask.size(), CV_8UC1);
+				for (int y = 0; y < resized_mask.rows; ++y) {
+					for (int j = 0; j < resized_mask.cols; ++j) {
+						int mask_pixel = resized_mask.at<uchar>(y, j);
+						if (std::abs(mask_pixel - param_KeyLevel) <= EXACT_DETECTION_DELTA) {
+							exact_value_mask.at<uchar>(y, j) = 255; // Mark pixels matching our target
+						}
+					}
 				}
 
-				// Apply mipmap effect
-				cv::Mat mipmap_result;
-				apply_mipmap(resized_mask, mipmap_result, static_cast<float>(default_scale), param_KeyLevel);
+				// Display the exact match mask (only for the first frame in batch)
+				if (i == 0) {
+					cv::imshow("Segmentation Mask", exact_value_mask);
+				}
 
+				// Visualize segmentation regions on original frame (using purple highlight)
+				cv::Mat visualization = original_frames[i].clone();
+				for (int y = 0; y < resized_mask.rows; ++y) {
+					for (int j = 0; j < resized_mask.cols; ++j) {
+						int mask_pixel = resized_mask.at<uchar>(y, j);
+						if (std::abs(mask_pixel - param_KeyLevel) <= EXACT_DETECTION_DELTA) {
+							// Draw a bright purple highlight
+							cv::Vec3b& pixel = visualization.at<cv::Vec3b>(y, j);
+							// Blend with original (50% original, 50% highlight)
+							pixel[0] = pixel[0] * 0.5 + 238 * 0.5; // B (purple component)
+							pixel[1] = pixel[1] * 0.5 + 130 * 0.5; // G
+							pixel[2] = pixel[2] * 0.5 + 238 * 0.5; // R (purple component)
+						}
+					}
+				}
+
+				// Display the segmentation visualization (only for the first frame in batch)
+				if (i == 0) {
+					cv::imshow("Segmentation Visualization", visualization);
+				}
+
+				// Apply enhanced glow blow effect with exact matching
+				cv::Mat dst_rgba;
+				glow_blow(resized_mask, dst_rgba, param_KeyLevel, EXACT_DETECTION_DELTA);
+
+				// Ensure proper RGBA format
+				if (dst_rgba.channels() != 4) {
+					cv::cvtColor(dst_rgba, dst_rgba, cv::COLOR_BGR2BGRA);
+				}
+
+				// Store the glow blow result
+				glow_blow_results.push_back(dst_rgba);
+
+				// Display the glow overlay (only for the first frame in batch)
+				if (i == 0) {
+					cv::imshow("Glow Overlay", dst_rgba);
+				}
+			}
+			catch (const std::exception& e) {
+				std::cerr << "Error in mask preprocessing for frame " << i << ": " << e.what() << std::endl;
+				// Add placeholder blank mask and rgba output
+				cv::Size targetSize = (original_frames[i].empty() || original_frames[i].cols <= 0 || original_frames[i].rows <= 0)
+					? defaultSize : original_frames[i].size();
+				resized_masks_batch.push_back(cv::Mat(targetSize, CV_8UC1, cv::Scalar(0)));
+				glow_blow_results.push_back(cv::Mat(targetSize, CV_8UC4, cv::Scalar(0, 0, 0, 0)));
+			}
+		}
+
+		// Apply triple buffered mipmap processing to all masks at once
+		auto mipmap_start = std::chrono::high_resolution_clock::now();
+		std::vector<cv::Mat> mipmap_results;
+
+		if (!resized_masks_batch.empty()) {
+			mipmap_results = triple_buffered_mipmap_pipeline(
+				resized_masks_batch, frame_width, frame_height,
+				static_cast<float>(default_scale), param_KeyLevel
+			);
+		}
+
+		auto mipmap_end = std::chrono::high_resolution_clock::now();
+		mipmap_time += std::chrono::duration<double>(mipmap_end - mipmap_start).count();
+
+		// Display the first mipmap result (if available)
+		if (!mipmap_results.empty()) {
+			cv::imshow("Mipmap Result", mipmap_results[0]);
+		}
+
+		// Now process each frame with the precomputed mipmap results
+		for (size_t i = 0; i < original_frames.size() && i < glow_blow_results.size() && i < mipmap_results.size(); ++i) {
+			try {
 				// Blend original, glow, and mipmap
 				cv::Mat final_result;
-				mix_images(original_frames[i], dst_rgba, mipmap_result, final_result, param_KeyScale);
+				mix_images(original_frames[i], glow_blow_results[i], mipmap_results[i], final_result, param_KeyScale);
 
 				// Handle empty result
 				if (final_result.empty() || final_result.size().width <= 0 || final_result.size().height <= 0) {
@@ -1202,9 +1349,21 @@ void glow_effect_video_single_batch_parallel(const char* video_nm, std::string p
 					final_result = cv::Mat(defaultSize, CV_8UC4, cv::Scalar(0, 0, 0, 255));
 				}
 
+				// Create side-by-side comparison (only for first frame in batch)
+				if (i == 0) {
+					cv::Mat comparison;
+					cv::Mat original_bgra;
+					cv::cvtColor(original_frames[i], original_bgra, cv::COLOR_BGR2BGRA);
+					cv::hconcat(original_bgra, final_result, comparison);
+					cv::imshow("Before-After Comparison", comparison);
+				}
+
 				// Display and write frame
-				cv::imshow("Processed Frame (Single-Batch Parallel)", final_result);
-				int key = cv::waitKey(30);
+				if (i == 0) {
+					cv::imshow("Processed Frame (Triple Buffered)", final_result);
+				}
+
+				int key = cv::waitKey(1); // Reduced wait time for better performance
 				if (key == 'q') {
 					processing = false;
 					break;
@@ -1213,12 +1372,14 @@ void glow_effect_video_single_batch_parallel(const char* video_nm, std::string p
 				output_video.write(final_result);
 			}
 			catch (const std::exception& e) {
-				std::cerr << "Error processing frame " << i << ": " << e.what() << std::endl;
+				std::cerr << "Error in final frame composition for frame " << i << ": " << e.what() << std::endl;
 				// Create a blank output frame and continue
 				cv::Mat blank_output = cv::Mat(defaultSize, CV_8UC4, cv::Scalar(0, 0, 0, 255));
 				output_video.write(blank_output);
-				cv::imshow("Processed Frame (Single-Batch Parallel)", blank_output);
-				cv::waitKey(30);
+				if (i == 0) {
+					cv::imshow("Processed Frame (Triple Buffered)", blank_output);
+					cv::waitKey(1);
+				}
 			}
 		}
 
@@ -1241,8 +1402,10 @@ void glow_effect_video_single_batch_parallel(const char* video_nm, std::string p
 
 	// Output performance metrics
 	std::cout << "---------------------------------------------------" << std::endl;
-	std::cout << "Single-Batch Parallel Video Processing Performance" << std::endl;
+	std::cout << "Triple Buffered Single Value Detection Performance" << std::endl;
 	std::cout << "---------------------------------------------------" << std::endl;
+	std::cout << "Target value processed: " << param_KeyLevel << std::endl;
+	std::cout << "Delta tolerance: " << EXACT_DETECTION_DELTA << std::endl;
 	std::cout << "Total frames processed: " << total_frames << std::endl;
 	std::cout << "Total processing time: " << total_time << " seconds" << std::endl;
 	if (total_frames > 0) {
@@ -1251,9 +1414,11 @@ void glow_effect_video_single_batch_parallel(const char* video_nm, std::string p
 	}
 	std::cout << "Segmentation time: " << segmentation_time << " seconds ("
 		<< (segmentation_time / total_time) * 100.0 << "%)" << std::endl;
+	std::cout << "Mipmap processing time: " << mipmap_time << " seconds ("
+		<< (mipmap_time / total_time) * 100.0 << "%)" << std::endl;
 	std::cout << "Post-processing time: " << post_processing_time << " seconds ("
 		<< (post_processing_time / total_time) * 100.0 << "%)" << std::endl;
-	std::cout << "Video processing completed with optimized Single-Batch Parallel acceleration." << std::endl;
+	std::cout << "Video processing completed with triple buffered acceleration." << std::endl;
 	std::cout << "Saved to: " << output_video_path << std::endl;
 	std::cout << "---------------------------------------------------" << std::endl;
 }

@@ -62,6 +62,7 @@ __global__ void d_gen_mipmap(
 	}
 }
 
+
 /**
  * @brief Generates a complete mipmap chain from a given CUDA mipmapped array.
  *

@@ -16,6 +16,11 @@
 #include <iterator>
 #include "segmentation_kernels.h"
 
+ // Add these external variable declarations
+extern int param_KeyLevel;  // Defined in control_gui.cpp
+extern int param_KeyScale;  // Defined in control_gui.cpp 
+extern int default_scale;   // Defined in control_gui.cpp
+
  //--------------------------------------------------------------------------
  // Measure Segmentation Inference (Single Image)
  //--------------------------------------------------------------------------
@@ -859,13 +864,12 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_mul_conc
 	return allResults;
 }
 
-//--------------------------------------------------------------------------
-// Processes multiple images in parallel using a single-batch TRT model
-//--------------------------------------------------------------------------
+//--------------------------------------------------------------------------------------
+// Processes multiple images in parallel using a single-batch TRT model with CUDA Graph
+//--------------------------------------------------------------------------------------
 std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_single_batch_parallel(const std::string& trt_plan, const std::vector<torch::Tensor>& img_tensors, int num_streams) {
 
-	std::cout << "Starting optimized parallel single-batch segmentation with " << num_streams
-		<< " concurrent streams for " << img_tensors.size() << " images" << std::endl;
+	std::cout << "Starting optimized parallel single-batch segmentation with post-processing CUDA Graph acceleration" << std::endl;
 
 	// Number of images to process
 	int num_images = img_tensors.size();
@@ -925,31 +929,17 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_single_b
 
 			// Create CUDA streams for this worker - separate streams for inference and post-processing
 			cudaStream_t inferStream, postStream;
-			cudaError_t stream_error;
-
-			stream_error = cudaStreamCreateWithFlags(&inferStream, cudaStreamNonBlocking);
-			if (stream_error != cudaSuccess) {
-				std::cerr << "Error creating inference CUDA stream: " << cudaGetErrorString(stream_error) << std::endl;
-				context->destroy();
-				return;
-			}
-
-			stream_error = cudaStreamCreateWithFlags(&postStream, cudaStreamNonBlocking);
-			if (stream_error != cudaSuccess) {
-				std::cerr << "Error creating post-processing CUDA stream: " << cudaGetErrorString(stream_error) << std::endl;
-				cudaStreamDestroy(inferStream);
-				context->destroy();
-				return;
-			}
-
-			// Initialize variables for post-processing graph (created once and reused)
-			cudaGraph_t postprocessGraph = nullptr;
-			cudaGraphExec_t postprocessGraphExec = nullptr;
-			bool graphCaptured = false;
+			checkCudaErrors(cudaStreamCreateWithFlags(&inferStream, cudaStreamNonBlocking));
+			checkCudaErrors(cudaStreamCreateWithFlags(&postStream, cudaStreamNonBlocking));
 
 			// Timing variables
 			auto worker_start_time = std::chrono::high_resolution_clock::now();
 			int local_frames_processed = 0;
+
+			// Variables for post-processing CUDA graph
+			cudaGraph_t postprocessGraph = nullptr;
+			cudaGraphExec_t postprocessGraphExec = nullptr;
+			bool postGraphCaptured = false;
 
 			// Process each image assigned to this worker
 			for (int img_idx = start_idx; img_idx < end_idx; ++img_idx) {
@@ -963,7 +953,7 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_single_b
 				}
 
 				try {
-					// === INPUT PREPARATION ===
+					// === PRE-ALLOCATION OF ALL MEMORY (BEFORE ANY GRAPH CAPTURE) ===
 
 					// Set input dimensions (always batch size 1 for single-batch model)
 					nvinfer1::Dims4 inputDims;
@@ -978,7 +968,7 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_single_b
 						continue;
 					}
 
-					// Allocate memory for input
+					// Allocate all input/output memory BEFORE any graph capture
 					size_t input_size = img_tensor.numel();
 					float* h_input = nullptr;
 					void* d_input = nullptr;
@@ -996,8 +986,10 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_single_b
 						continue;
 					}
 
-					// Copy input data to pinned host memory, then to device
+					// Copy input data to host buffer
 					std::memcpy(h_input, img_tensor.data_ptr<float>(), input_size * sizeof(float));
+
+					// Copy to device (outside any graph capture)
 					cuda_error = cudaMemcpyAsync(d_input, h_input, input_size * sizeof(float),
 						cudaMemcpyHostToDevice, inferStream);
 					if (cuda_error != cudaSuccess) {
@@ -1007,8 +999,6 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_single_b
 						continue;
 					}
 
-					// === OUTPUT PREPARATION ===
-
 					// Set up bindings and allocate output memory
 					std::vector<void*> bindings = { d_input };
 					std::vector<void*> d_outputs;
@@ -1016,7 +1006,6 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_single_b
 					nvinfer1::Dims outputDims;
 
 					// Setup output bindings - always get output binding info after setting input dimensions
-					bool setup_success = true;
 					for (int i = 1; i < engine->getNbBindings(); ++i) {
 						outputDims = context->getBindingDimensions(i);
 						int outputSize = 1;
@@ -1030,7 +1019,12 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_single_b
 						cuda_error = cudaMallocHost((void**)&h_output, outputSize * sizeof(float));
 						if (cuda_error != cudaSuccess) {
 							std::cerr << "Error allocating host output memory: " << cudaGetErrorString(cuda_error) << std::endl;
-							setup_success = false;
+							for (size_t j = 0; j < h_outputs.size(); j++) {
+								cudaFreeHost(h_outputs[j]);
+								cudaFree(d_outputs[j]);
+							}
+							cudaFree(d_input);
+							cudaFreeHost(h_input);
 							break;
 						}
 
@@ -1038,7 +1032,12 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_single_b
 						if (cuda_error != cudaSuccess) {
 							std::cerr << "Error allocating device output memory: " << cudaGetErrorString(cuda_error) << std::endl;
 							cudaFreeHost(h_output);
-							setup_success = false;
+							for (size_t j = 0; j < h_outputs.size(); j++) {
+								cudaFreeHost(h_outputs[j]);
+								cudaFree(d_outputs[j]);
+							}
+							cudaFree(d_input);
+							cudaFreeHost(h_input);
 							break;
 						}
 
@@ -1047,15 +1046,9 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_single_b
 						bindings.push_back(d_output);
 					}
 
-					if (!setup_success) {
-						// Clean up resources allocated so far
-						cudaFree(d_input);
-						cudaFreeHost(h_input);
-						for (size_t i = 0; i < h_outputs.size(); i++) {
-							cudaFreeHost(h_outputs[i]);
-							cudaFree(d_outputs[i]);
-						}
-						continue;
+					// Check if we hit an error in the binding setup loop
+					if (h_outputs.size() != engine->getNbBindings() - 1) {
+						continue; // Skip to next image if memory allocation failed
 					}
 
 					// Get output dimensions for post-processing
@@ -1068,64 +1061,51 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_single_b
 					unsigned char* d_argmax_output = nullptr;
 					cuda_error = cudaMalloc(&d_argmax_output, height * width * sizeof(unsigned char));
 					if (cuda_error != cudaSuccess) {
-						std::cerr << "Error allocating device argmax memory: " << cudaGetErrorString(cuda_error) << std::endl;
+						std::cerr << "Error allocating argmax output memory: " << cudaGetErrorString(cuda_error) << std::endl;
+						for (size_t j = 0; j < h_outputs.size(); j++) {
+							cudaFreeHost(h_outputs[j]);
+							cudaFree(d_outputs[j]);
+						}
 						cudaFree(d_input);
 						cudaFreeHost(h_input);
-						for (size_t i = 0; i < h_outputs.size(); i++) {
-							cudaFreeHost(h_outputs[i]);
-							cudaFree(d_outputs[i]);
-						}
 						continue;
 					}
 
-					// === TIMING SETUP ===
+					// === RUN TENSORRT INFERENCE (NO GRAPH CAPTURE) ===
 					cudaEvent_t start, stop;
 					cudaEventCreate(&start);
 					cudaEventCreate(&stop);
-
-					// === INFERENCE EXECUTION (never captured in graph) ===
 					cudaEventRecord(start, inferStream);
 
-					// Run TensorRT inference in the inference stream - NOT captured in graph
-					bool inference_success = context->enqueueV2(bindings.data(), inferStream, nullptr);
-					if (!inference_success) {
+					// Run TensorRT inference - NOT in a CUDA graph since it's not supported
+					if (!context->enqueueV2(bindings.data(), inferStream, nullptr)) {
 						std::cerr << "Error: TensorRT enqueueV2 failed for image " << img_idx << std::endl;
 						cudaEventDestroy(start);
 						cudaEventDestroy(stop);
 						cudaFree(d_argmax_output);
+						for (size_t j = 0; j < h_outputs.size(); j++) {
+							cudaFreeHost(h_outputs[j]);
+							cudaFree(d_outputs[j]);
+						}
 						cudaFree(d_input);
 						cudaFreeHost(h_input);
-						for (size_t i = 0; i < h_outputs.size(); i++) {
-							cudaFreeHost(h_outputs[i]);
-							cudaFree(d_outputs[i]);
-						}
 						continue;
 					}
 
-					// Ensure inference is completed before continuing
-					cuda_error = cudaStreamSynchronize(inferStream);
-					if (cuda_error != cudaSuccess) {
-						std::cerr << "Error synchronizing inference stream: " << cudaGetErrorString(cuda_error) << std::endl;
-						cudaEventDestroy(start);
-						cudaEventDestroy(stop);
-						cudaFree(d_argmax_output);
-						cudaFree(d_input);
-						cudaFreeHost(h_input);
-						for (size_t i = 0; i < h_outputs.size(); i++) {
-							cudaFreeHost(h_outputs[i]);
-							cudaFree(d_outputs[i]);
-						}
-						continue;
-					}
+					// Wait for inference to complete
+					cudaStreamSynchronize(inferStream);
 
-					// === POST-PROCESSING CUDA GRAPH (create once, reuse for all images) ===
-					if (!graphCaptured) {
+					// === POST-PROCESSING WITH CUDA GRAPH ===
+					// Try to create and execute a CUDA graph for post-processing only
+
+					// Only capture the graph on the first successful run
+					if (!postGraphCaptured) {
 						try {
-							// Create a graph for post-processing operations only
+							// Start graph capture for post-processing only
 							cuda_error = cudaStreamBeginCapture(postStream, cudaStreamCaptureModeRelaxed);
 							if (cuda_error != cudaSuccess) {
-								std::cerr << "Error beginning CUDA graph capture: " << cudaGetErrorString(cuda_error) << std::endl;
-								throw std::runtime_error("CUDA Graph capture initialization failed");
+								throw std::runtime_error(std::string("Failed to begin graph capture: ") +
+									cudaGetErrorString(cuda_error));
 							}
 
 							// Add argmax kernel to the graph
@@ -1142,25 +1122,26 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_single_b
 							// End capture and instantiate the graph
 							cuda_error = cudaStreamEndCapture(postStream, &postprocessGraph);
 							if (cuda_error != cudaSuccess) {
-								std::cerr << "Error ending CUDA graph capture: " << cudaGetErrorString(cuda_error) << std::endl;
-								throw std::runtime_error("CUDA Graph capture failed during end capture");
+								throw std::runtime_error(std::string("Failed to end graph capture: ") +
+									cudaGetErrorString(cuda_error));
 							}
 
 							cuda_error = cudaGraphInstantiate(&postprocessGraphExec, postprocessGraph, nullptr, nullptr, 0);
 							if (cuda_error != cudaSuccess) {
-								std::cerr << "Error instantiating CUDA graph: " << cudaGetErrorString(cuda_error) << std::endl;
-								throw std::runtime_error("CUDA Graph instantiation failed");
+								throw std::runtime_error(std::string("Failed to instantiate graph: ") +
+									cudaGetErrorString(cuda_error));
 							}
 
-							graphCaptured = true;
+							postGraphCaptured = true;
 							graph_usage[t] = true;
 							std::cout << "Worker " << t << ": Successfully created post-processing graph" << std::endl;
 						}
 						catch (const std::exception& e) {
-							std::cerr << "Worker " << t << ": CUDA Graph capture failed: " << e.what() << std::endl;
-							std::cerr << "Falling back to normal execution mode" << std::endl;
+							std::cerr << "Worker " << t << ": CUDA Graph capture for post-processing failed: "
+								<< e.what() << std::endl;
+							std::cerr << "Falling back to normal execution mode for post-processing" << std::endl;
 
-							// Clean up any partial graph
+							// Clean up any partial graph resources
 							if (postprocessGraph) {
 								cudaGraphDestroy(postprocessGraph);
 								postprocessGraph = nullptr;
@@ -1173,12 +1154,13 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_single_b
 					}
 
 					// Execute post-processing (with graph if available, or regular execution)
-					if (graphCaptured && postprocessGraphExec) {
+					if (postGraphCaptured && postprocessGraphExec) {
 						// Execute the captured post-processing graph
 						cuda_error = cudaGraphLaunch(postprocessGraphExec, postStream);
 						if (cuda_error != cudaSuccess) {
-							std::cerr << "Error launching CUDA graph: " << cudaGetErrorString(cuda_error) << std::endl;
-							// Fall back to regular execution
+							std::cerr << "Error launching post-processing graph: "
+								<< cudaGetErrorString(cuda_error) << std::endl;
+							// Fall back to regular kernel launch
 							launchArgmaxKernel(
 								static_cast<float*>(d_outputs.back()),
 								d_argmax_output,
@@ -1191,7 +1173,7 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_single_b
 						}
 					}
 					else {
-						// Fall back to regular kernel launch
+						// Fall back to regular kernel launch if graph not available
 						launchArgmaxKernel(
 							static_cast<float*>(d_outputs.back()),
 							d_argmax_output,
@@ -1204,20 +1186,7 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_single_b
 					}
 
 					// Wait for post-processing to complete
-					cuda_error = cudaStreamSynchronize(postStream);
-					if (cuda_error != cudaSuccess) {
-						std::cerr << "Error synchronizing post-processing stream: " << cudaGetErrorString(cuda_error) << std::endl;
-						cudaEventDestroy(start);
-						cudaEventDestroy(stop);
-						cudaFree(d_argmax_output);
-						cudaFree(d_input);
-						cudaFreeHost(h_input);
-						for (size_t i = 0; i < h_outputs.size(); i++) {
-							cudaFreeHost(h_outputs[i]);
-							cudaFree(d_outputs[i]);
-						}
-						continue;
-					}
+					cudaStreamSynchronize(postStream);
 
 					// Copy results back to host
 					unsigned char* h_argmax_output = new unsigned char[height * width];
@@ -1230,36 +1199,19 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_single_b
 						cudaEventDestroy(start);
 						cudaEventDestroy(stop);
 						cudaFree(d_argmax_output);
+						for (size_t j = 0; j < h_outputs.size(); j++) {
+							cudaFreeHost(h_outputs[j]);
+							cudaFree(d_outputs[j]);
+						}
 						cudaFree(d_input);
 						cudaFreeHost(h_input);
-						for (size_t i = 0; i < h_outputs.size(); i++) {
-							cudaFreeHost(h_outputs[i]);
-							cudaFree(d_outputs[i]);
-						}
 						continue;
 					}
+					cudaStreamSynchronize(postStream);
 
-					cuda_error = cudaStreamSynchronize(postStream);
-					if (cuda_error != cudaSuccess) {
-						std::cerr << "Error synchronizing copy stream: " << cudaGetErrorString(cuda_error) << std::endl;
-						delete[] h_argmax_output;
-						cudaEventDestroy(start);
-						cudaEventDestroy(stop);
-						cudaFree(d_argmax_output);
-						cudaFree(d_input);
-						cudaFreeHost(h_input);
-						for (size_t i = 0; i < h_outputs.size(); i++) {
-							cudaFreeHost(h_outputs[i]);
-							cudaFree(d_outputs[i]);
-						}
-						continue;
-					}
-
-					// Record completion time
+					// Record end timing
 					cudaEventRecord(stop, inferStream);
 					cudaStreamSynchronize(inferStream);
-
-					// Calculate elapsed time
 					float milliseconds = 0;
 					cudaEventElapsedTime(&milliseconds, start, stop);
 
@@ -1273,24 +1225,16 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_single_b
 						results[img_idx] = result.clone();
 					}
 
-					// Log processing statistics
-					std::cout << "Worker " << t << " processed image " << img_idx
-						<< " in " << milliseconds << " ms"
-						<< (graphCaptured ? " (with post-processing CUDA Graph)" : " (without CUDA Graph)") << std::endl;
-
 					// Update local counters
 					local_frames_processed++;
 
 					// Cleanup per-image resources
 					delete[] h_argmax_output;
 					cudaFree(d_argmax_output);
-
 					cudaEventDestroy(start);
 					cudaEventDestroy(stop);
-
 					cudaFreeHost(h_input);
 					cudaFree(d_input);
-
 					for (auto ptr : h_outputs) {
 						cudaFreeHost(ptr);
 					}
@@ -1322,7 +1266,6 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_single_b
 			if (postprocessGraph) {
 				cudaGraphDestroy(postprocessGraph);
 			}
-
 			cudaStreamDestroy(inferStream);
 			cudaStreamDestroy(postStream);
 			context->destroy();
@@ -1351,7 +1294,7 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_single_b
 			std::cout << " (" << fps << " fps)";
 		}
 
-		std::cout << (graph_usage[t] ? " [CUDA Graph]" : " [Standard]") << std::endl;
+		std::cout << (graph_usage[t] ? " [with CUDA Graph]" : " [without CUDA Graph]") << std::endl;
 
 		total_processing_time += processing_times[t];
 		total_processed += frames_processed[t];
