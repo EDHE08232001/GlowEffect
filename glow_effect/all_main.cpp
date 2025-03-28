@@ -82,6 +82,7 @@ void bar_default_scale_cb(int newValue) {
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 int main() {
+	// _putenv_s("CUDA_LAUNCH_BLOCKING", "1");
 	try {
 		auto usage = []() {
 			printf("Usage:\n");
@@ -223,6 +224,11 @@ int main() {
 			}
 		}
 		else if (userInput == "video" || userInput == "v") {
+			/*std::cout << "PyTorch version: " << TORCH_VERSION << std::endl;
+			std::cout << "CUDA Available: " << torch::cuda::is_available() << std::endl;
+			std::cout << "CUDA Version in PyTorch: " << TORCH_CUDA_VERSION << std::endl;
+			std::cout << "Number of CUDA Devices: " << torch::cuda::device_count() << std::endl;*/
+
 			std::string videoPath;
 
 			std::string videoInputOption;
@@ -257,7 +263,7 @@ int main() {
 			}
 
 			try {
-				glow_effect_video(videoPath.c_str(), planFilePath);
+				glow_effect_video_OPT(videoPath.c_str());
 			}
 			catch (const std::exception& e) {
 				std::cerr << "Error processing video: " << e.what() << std::endl;

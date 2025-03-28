@@ -41,6 +41,7 @@ public:
     static torch::Tensor process_img(const std::string& img_path, bool grayscale = false);
     static torch::Tensor process_img(const cv::cuda::GpuMat& process_img, bool grayscale = false);
 
+
     static torch::Tensor process_img_batch(const vector<string>& img_paths, bool grayscale = false);
 };
 

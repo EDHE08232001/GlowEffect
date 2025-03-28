@@ -3,9 +3,7 @@
  *
  * PROJECT NAME:    Cuda Learning
  *
- * DESCRIPTION :    This file implements various glow-related effects such as "blow" highlighting,
- *                  mipmapping, and alpha blending to create bloom/glow effects on images and video frames.
- *                  It integrates CUDA kernels, OpenCV, and TensorRT (for segmentation in the video pipeline).
+ * DESCRIPTION :    dilate or erode algorithm
  *
  * VERSION HISTORY
  * YYYY/MMM/DD      Author          Comments
@@ -27,53 +25,36 @@
 #include <iostream>
 #include <string>
 #include <opencv2/cudawarping.hpp>
+#include <opencv2/core.hpp>
+#include <opencv2/highgui.hpp>
+#include <opencv2/cudaimgproc.hpp>
+#include <opencv2/videoio.hpp>
+#include <opencv2/imgproc.hpp>
+#include <cuda_runtime.h>
+#include <chrono>
+#include <nvToolsExt.h>
+#include "resizeWithTexture.h"
+// #include <glow_effect/source_cu/mipmap.cu>
 
- /**
-  * @brief Global boolean array indicating button states in GUI (for demonstration/testing).
-  *
-  * This array is used internally to simulate or track various button states that may
-  * control different aspects of the glow or mipmap effects.
-  */
+ // Global Variable Array: button_State
 bool button_State[5] = { false, false, false, false, false };
 
-// Macros controlling which filters are active (used in other modules, e.g. dilate/erode).
+
 #define FILTER_MORPH 1
 #define FILTER_GAUSS 1
 
+
+
 /**
- * -------------------------------------------------------------------------------------------------
- * glow_blow
- * -------------------------------------------------------------------------------------------------
+ * @brief Applies a glowing effect to an image based on a segmentation mask.
  *
- * @details
- * Applies a simple "blow" or highlight effect to an output RGBA image, based on whether the
- * input grayscale mask contains pixels within a specified range around `param_KeyLevel`.
+ * This function checks if the input segmentation mask contains regions that satisfy a specific condition.
+ * If such regions are found, it creates an RGBA image with a pink overlay applied to all pixels.
  *
- * - If the mask contains any pixel such that |mask_pixel - param_KeyLevel| < Delta, then the
- *   entire output image (`dst_rgba`) is filled with a pink overlay (fully opaque).
- * - If no such pixel is found, `dst_rgba` remains black/transparent.
- *
- * **Core Steps:**
- * 1. Verify the mask is valid and single-channel.
- * 2. Search for pixels that meet the highlight condition (`param_KeyLevel ± Delta`).
- * 3. If found, fill the output with an RGBA overlay color; otherwise leave it transparent.
- *
- * **Usage Example:**
- * @code
- * cv::Mat mask = cv::imread("segmentation_mask.png", cv::IMREAD_GRAYSCALE);
- * cv::Mat dst;
- * glow_blow(mask, dst, 128, 10);
- * // If any pixel in 'mask' is within [118..138], dst is fully pink/opaque
- * // otherwise dst is transparent.
- * @endcode
- *
- * @param[in]  mask          A single-channel (CV_8UC1) mask.
- * @param[out] dst_rgba      Output RGBA image (CV_8UC4); created/overwritten here.
- * @param[in]  param_KeyLevel Key level parameter controlling the highlight trigger.
- * @param[in]  Delta         The tolerance range around `param_KeyLevel`.
- *
- * @pre  `mask.type() == CV_8UC1` (grayscale) and `mask` is not empty.
- * @post `dst_rgba` is either transparent (no region found) or fully pink (region found).
+ * @param mask Input single-channel segmentation mask (CV_8UC1).
+ * @param dst_rgba Output RGBA image (CV_8UC4) with the overlay applied.
+ * @param param_KeyLevel Threshold level to determine target regions in the mask.
+ * @param Delta Tolerance range around param_KeyLevel for determining target regions.
  */
 void glow_blow(const cv::Mat& mask, cv::Mat& dst_rgba, int param_KeyLevel, int Delta) {
 	// Check if the input mask is empty.
@@ -122,41 +103,24 @@ void glow_blow(const cv::Mat& mask, cv::Mat& dst_rgba, int param_KeyLevel, int D
 	}
 
 	// Print the result of the operation.
-	std::cout << "glow_blow completed. Target region "
-		<< (has_target_region ? "found and applied." : "not found.") << std::endl;
+	std::cout << "glow_blow completed. Target region " << (has_target_region ? "found and applied." : "not found.") << std::endl;
 }
 
+
+
+
+
 /**
- * -------------------------------------------------------------------------------------------------
- * apply_mipmap
- * -------------------------------------------------------------------------------------------------
+ * @brief Applies a mipmap-like operation to a grayscale image, producing an RGBA output image.
  *
- * @details
- * This function takes a single-channel grayscale image (`input_gray`), creates an RGBA representation
- * where only pixels equal to `param_KeyLevel` are opaque, and then calls `filter_mipmap` to perform
- * a CUDA-based downscale or blur. The result is stored in `output_image`.
+ * This function filters an input grayscale image based on a specified key level. Pixels matching the key level
+ * are preserved with full opacity in an RGBA output image, while others are set to transparent. It also applies
+ * a custom filter operation (filter_mipmap) on the processed data.
  *
- * **Core Steps:**
- * 1. Validate input image (grayscale, non-empty).
- * 2. Convert grayscale to an RGBA buffer (`src_img`) with selective opacity (only `param_KeyLevel` is opaque).
- * 3. Invoke `filter_mipmap` on the CUDA device.
- * 4. Reconstruct the RGBA output in `output_image`.
- *
- * **Usage Example:**
- * @code
- * cv::Mat gray = cv::imread("gray_mask.png", cv::IMREAD_GRAYSCALE);
- * cv::Mat out;
- * apply_mipmap(gray, out, 0.5f, 128);
- * // 'out' is an RGBA image with filtered result from the CUDA mipmap.
- * @endcode
- *
- * @param[in]  input_gray     The source single-channel (CV_8UC1) grayscale image.
- * @param[out] output_image   The destination RGBA (CV_8UC4) image after mipmap filtering.
- * @param[in]  scale          The scale factor used by `filter_mipmap` (e.g., 0.5f).
- * @param[in]  param_KeyLevel A grayscale value determining which pixels become opaque before filtering.
- *
- * @pre  `input_gray` is valid, non-empty, and has `1` channel (8-bit).
- * @post `output_image` is generated and saved (for debugging) as "output_image_after_mipmap.png".
+ * @param input_gray Input single-channel grayscale image (CV_8UC1).
+ * @param output_image Output RGBA image (CV_8UC4) with the mipmap operation applied.
+ * @param scale Scaling factor used in the mipmap filter operation.
+ * @param param_KeyLevel Grayscale value to determine target pixels in the input image.
  */
 void apply_mipmap(const cv::Mat& input_gray, cv::Mat& output_image, float scale, int param_KeyLevel) {
 	// Retrieve image dimensions.
@@ -199,7 +163,7 @@ void apply_mipmap(const cv::Mat& input_gray, cv::Mat& output_image, float scale,
 		}
 	}
 
-	// Convert uchar4 array to an OpenCV RGBA image for debugging purposes.
+	// Convert uchar4 array to OpenCV RGBA image for debugging purposes.
 	cv::Mat uchar4_image_before(height, width, CV_8UC4);
 	for (int i = 0; i < height; ++i) {
 		for (int j = 0; j < width; ++j) {
@@ -210,7 +174,7 @@ void apply_mipmap(const cv::Mat& input_gray, cv::Mat& output_image, float scale,
 	cv::imwrite("./pngOutput/converted_uchar4_before_mipmap.png", uchar4_image_before);
 	std::cout << "Converted uchar4 image saved as converted_uchar4_before_mipmap.png" << std::endl;
 
-	// Apply the mipmap filter operation (CUDA).
+	// Apply the mipmap filter operation.
 	filter_mipmap(width, height, scale, src_img, dst_img);
 
 	// Convert the filtered uchar4 array back to an OpenCV RGBA image.
@@ -231,38 +195,21 @@ void apply_mipmap(const cv::Mat& input_gray, cv::Mat& output_image, float scale,
 	delete[] dst_img;
 }
 
+
+
+
+
 /**
- * -------------------------------------------------------------------------------------------------
- * mix_images
- * -------------------------------------------------------------------------------------------------
+ * @brief Mixes three images (source, highlighted, and mipmap) into a single output image using alpha blending.
  *
- * @details
- * Blends two images (`img1` and `img2`) using a grayscale mask (`mask`) and a global alpha factor (`alpha`).
- * Internally, this function:
+ * This function combines the source image, a highlighted image, and a mipmap result image. The mipmap result's
+ * grayscale values are used as the alpha channel to blend the source and highlighted images, scaled by a key factor.
  *
- * 1. Ensures both images are RGBA (4-channel). If not, converts them.
- * 2. Interprets the mask's pixel values as alpha multipliers (optionally scaled by `param_KeyScale` or `alpha`).
- * 3. Performs per-pixel blending:
- *    \f$ \text{output} = \text{img1} \times (255 - \alpha) + \text{img2} \times \alpha \f$
- *
- * **Usage Example:**
- * @code
- * cv::Mat src = cv::imread("source.png", cv::IMREAD_COLOR); // BGR
- * cv::Mat highlight = cv::imread("highlight.png", cv::IMREAD_COLOR);
- * cv::Mat mask = cv::imread("mask.png", cv::IMREAD_GRAYSCALE);
- * cv::Mat output;
- * mix_images(src, highlight, mask, output, 0.5f);
- * // 'output' is now a blended RGBA image.
- * @endcode
- *
- * @param[in]  img1   The first source image (can be 3 or 4 channels).
- * @param[in]  img2   The second source image (can be 3 or 4 channels).
- * @param[in]  mask   A single-channel (CV_8UC1) mask that influences blending.
- * @param[out] dst    The final blended image (CV_8UC4).
- * @param[in]  alpha  A floating-point factor scaling the mask-based alpha.
- *
- * @pre  `img1.size() == img2.size() == mask.size()`, and none are empty.
- * @post `dst` (RGBA) contains the blended result.
+ * @param src_img Input source image (must have 3 or 4 channels).
+ * @param dst_rgba Input highlighted image (must have 4 channels).
+ * @param mipmap_result Input mipmap image (must be single-channel grayscale or convertible to grayscale).
+ * @param output_image Output image after blending (CV_8UC4).
+ * @param param_KeyScale Scaling factor for alpha channel values.
  */
 void mix_images(const cv::Mat& src_img, const cv::Mat& dst_rgba, const cv::Mat& mipmap_result, cv::Mat& output_image, float param_KeyScale) {
 	// Check if the input images are valid.
@@ -331,31 +278,38 @@ void mix_images(const cv::Mat& src_img, const cv::Mat& dst_rgba, const cv::Mat& 
 	std::cout << "Image mixing completed successfully using scaled alpha." << std::endl;
 }
 
+cv::Mat threshold_mask_to_rgba(const cv::Mat& grayscale_mask, int param_KeyLevel, int tolerance)
+{
+	CV_Assert(grayscale_mask.type() == CV_8UC1);
+	cv::Mat mask_rgba(grayscale_mask.size(), CV_8UC4, cv::Scalar(0, 0, 0, 0));
+
+	for (int i = 0; i < grayscale_mask.rows; ++i) {
+		for (int j = 0; j < grayscale_mask.cols; ++j) {
+			uchar pixel = grayscale_mask.at<uchar>(i, j);
+			// If pixel is exactly equal (or within tolerance) to param_KeyLevel, make it opaque.
+			if (std::abs(pixel - param_KeyLevel) <= tolerance) {
+				mask_rgba.at<cv::Vec4b>(i, j) = cv::Vec4b(pixel, pixel, pixel, 255);
+			}
+			else {
+				mask_rgba.at<cv::Vec4b>(i, j) = cv::Vec4b(0, 0, 0, 0);
+			}
+		}
+	}
+	return mask_rgba;
+}
+
+
+
+
+
 /**
- * -------------------------------------------------------------------------------------------------
- * glow_effect_image
- * -------------------------------------------------------------------------------------------------
+ * @brief Applies a glow effect to an input image using a grayscale mask.
  *
- * @details
- * Provides a high-level pipeline for applying glow effects to a single image:
- * 1. Loads the source image from `image_nm`.
- * 2. Generates a highlight overlay using `glow_blow`.
- * 3. Performs a mipmap transformation on the input mask (`apply_mipmap`).
- * 4. Blends the original image, highlight overlay, and mipmap result (`mix_images`).
- * 5. Displays and saves the final result as "final_result.png".
+ * This function combines various operations including generating a highlighted effect,
+ * applying a mipmap operation, and blending multiple images to produce a final result.
  *
- * **Usage Example:**
- * @code
- * cv::Mat mask = cv::imread("mask.png", cv::IMREAD_GRAYSCALE);
- * glow_effect_image("input.png", mask);
- * @endcode
- *
- * @param[in] image_nm        Path to the source image file.
- * @param[in] grayscale_mask  Single-channel mask image guiding the glow effect.
- *
- * @pre  The file at `image_nm` should be a valid image readable by OpenCV.
- * @pre  `grayscale_mask.size()` should match the loaded image’s size for best alignment.
- * @post Final result is shown in a window and saved to `./results/final_result.png`.
+ * @param image_nm Path to the source image file.
+ * @param grayscale_mask Input grayscale mask image (CV_8UC1).
  */
 void glow_effect_image(const char* image_nm, const cv::Mat& grayscale_mask) {
 	// Load the source image from the given file path.
@@ -391,70 +345,50 @@ void glow_effect_image(const char* image_nm, const cv::Mat& grayscale_mask) {
 	cv::imwrite("./results/final_result.png", final_result);
 }
 
+
+
+
+
 /**
- * -------------------------------------------------------------------------------------------------
- * glow_effect_video
- * -------------------------------------------------------------------------------------------------
+ * @brief Applies a glow effect to each frame of a video using segmentation and image processing.
  *
- * @details
- * Processes an entire video, applying a glow effect to each frame:
+ * This function processes a video frame by frame, applying a glow effect based on a segmentation mask.
+ * Each frame is processed using TensorRT for inference, mipmap operations, and blending to create the final result.
+ * The processed frames are saved and combined into a new video.
  *
- * 1. Opens the specified video file.
- * 2. Reads frames in batches of four, performing TensorRT inference to generate segmentation masks.
- * 3. For each mask in the batch, runs `glow_blow`, `apply_mipmap`, and `mix_images` to create the final processed frame.
- * 4. Saves each processed frame to disk.
- * 5. Compiles all processed frames into `processed_video.avi`.
- *
- * **Usage Example:**
- * @code
- * glow_effect_video("input_video.mp4");
- * @endcode
- *
- * @param[in] video_nm			Path to the input video file.
- * @param[in] planFilePath		Path to trt plan
- *
- * @pre  `video_nm` must point to a valid video file (supported by OpenCV).
- * @post Outputs processed frames into `./VideoOutput` and saves a compiled video `processed_video.avi`.
+ * @param video_nm Path to the input video file.
  */
-void glow_effect_video(const char* video_nm) {
-	// For debugging and informational purposes, print out the OpenCV build info.
+void glow_effect_video_OPT(const char* video_nm) {
+	// Print OpenCV build information for debugging.
 	cv::String info = cv::getBuildInformation();
 	std::cout << info << std::endl;
 
-	// Create a VideoCapture object to handle reading frames from the specified video file.
 	cv::VideoCapture video;
 	bool pause = false;
 
-	// Attempt to open the video using any available backend. If this fails, print an error and return.
+	// Open the video file.
 	if (!video.open(video_nm, cv::VideoCaptureAPIs::CAP_ANY)) {
 		std::cerr << "Error: Could not open video file: " << video_nm << std::endl;
 		return;
 	}
 
-	// Retrieve various properties of the video, such as its frame width, height, and frames per second (FPS).
+	// Retrieve video parameters.
 	int frame_width = static_cast<int>(video.get(cv::CAP_PROP_FRAME_WIDTH));
 	int frame_height = static_cast<int>(video.get(cv::CAP_PROP_FRAME_HEIGHT));
 	int fps = static_cast<int>(video.get(cv::CAP_PROP_FPS));
 
-	// Create an output folder for processed frames.
-
-	// Create output video writer directy.
 	std::string output_video_path = "./VideoOutput/processed_video.avi";
 	cv::VideoWriter output_video(output_video_path, cv::VideoWriter::fourcc('M', 'J', 'P', 'G'), fps,
 		cv::Size(frame_width, frame_height));
 
 	if (!output_video.isOpened()) {
-		std::cerr << "Error: COuld not open the ouput video for writing: " << output_video_path << std::endl;
+		std::cerr << "Error: Could not open the output video file for writing: " << output_video_path << std::endl;
 		return;
 	}
-
-	/*std::string output_folder = "./VideoOutput";
-	std::filesystem::create_directory(output_folder);*/
 
 	// Define the TensorRT plan file path for segmentation.
 	std::string planFilePath = "D:/csi4900/TRT-Plans/mobileone_s4.lw.plan";          // user config
 
-	// Pinned memory allocation for CPU-GPU transfer.
 	float* h_frame;
 	size_t frameSize = frame_width * frame_height * 3;
 	cudaMallocHost((void**)&h_frame, frameSize * sizeof(float));
@@ -462,21 +396,18 @@ void glow_effect_video(const char* video_nm) {
 	cv::cuda::GpuMat gpu_frame;
 
 	std::vector<torch::Tensor> batch_frames;
-
-	// cv::Mat src_img, dst_img;
 	int frame_count = 0; // Counter for saved frames.
 
 	while (video.isOpened()) {
+		// Prepare a batch of frames.
 		std::vector<cv::Mat> original_frames;
 		batch_frames.clear();
 
-		// Attempt to read four frames from the video source.
 		for (int i = 0; i < 4; ++i) {
 			cv::Mat frame;
 			if (!video.read(frame) || frame.empty()) {
 				if (batch_frames.empty()) break; // End of video.
 				batch_frames.push_back(batch_frames.back()); // Pad batch with last frame.
-				batch_frames.push_back(batch_frames.back());
 				original_frames.push_back(original_frames.back().clone());
 				continue;
 			}
@@ -488,74 +419,70 @@ void glow_effect_video(const char* video_nm) {
 			cv::cuda::GpuMat resized_gpu_frame;
 			cv::cuda::resize(gpu_frame, resized_gpu_frame, cv::Size(384, 384));
 
-			// Resize the frame to 384x384 for inference.
-			/*cv::Mat resized_img;
-			cv::resize(src_img, resized_img, cv::Size(384, 384));*/
-
-			// Save temporary resized image.
-			/*std::string temp_img_path = "./temp_video_frame_" + std::to_string(i) + ".png";
-			cv::imwrite(temp_img_path, resized_img);*/
 
 			// Convert the image to a tensor.
 			torch::Tensor frame_tensor = ImageProcessingUtil::process_img(resized_gpu_frame, false);
-
 			frame_tensor = frame_tensor.to(torch::kFloat);
-
-			// Add the tensor to our batch.
+			frame_tensor = frame_tensor.squeeze(0);
 			batch_frames.push_back(frame_tensor);
 
-
-			// Remove the temporary file.
-			// std::filesystem::remove(temp_img_path);
 		}
 
-		// If we didn't read any frames at all (i.e., the video is finished), break the main loop.
-		if (batch_frames.empty()) break;
+		if (batch_frames.empty()) break; // All frames processed.
 
-		// If we have fewer than four frames in this batch (e.g., end of video), 
-		// duplicate the last frame/tensor to pad up to a full batch.
+		// Pad batch if it contains fewer than 4 frames.
 		while (batch_frames.size() < 4) {
 			batch_frames.push_back(batch_frames.back());
 			original_frames.push_back(original_frames.back().clone());
 		}
 
-		// Combine the 4 individual frame tensors into a single batched tensor of shape [4, 3, 384, 384].
-		torch::Tensor batch_tensor = torch::stack(batch_frames, 0);
+		// Stack tensors into a batch.
+		torch::Tensor batch_tensor = torch::stack(batch_frames, 0); // Shape: [4, 3, 384, 384]
 
-		// Perform TensorRT inference on the batched tensor to obtain segmentation masks for each frame.
-		// This function returns a vector of single-channel cv::Mat objects (grayscale masks).
-		std::vector<cv::Mat> grayscale_masks = TRTInference::measure_segmentation_trt_performance_mul(planFilePath, batch_tensor, 1);
+		// Perform TensorRT inference to obtain segmentation masks.
+		std::vector<cv::Mat> grayscale_masks = TRTInference::measure_segmentation_trt_performance_mul_OPT(planFilePath, batch_tensor, 1);
 
-		// If we successfully retrieved masks, process them.
 		if (!grayscale_masks.empty()) {
-			// Each mask in `grayscale_masks` corresponds to a frame in the current batch.
 			for (int i = 0; i < 4; ++i) {
 				cv::Mat grayscale_mask;
-				// Resize the returned mask to match the original frame's size (before we had resized to 384x384).
 				cv::resize(grayscale_masks[i], grayscale_mask, original_frames[i].size());
 
-				// Use the grayscale mask to produce a "blow" or highlight effect.
-				// glow_blow will fill an RGBA image (`dst_rgba`) if the mask contains pixels 
-				// near our key-level threshold, otherwise it remains transparent.
+				int tolerance = 0; // Adjust tolerance as needed.
+				cv::Mat mask_rgba = threshold_mask_to_rgba(grayscale_mask, param_KeyLevel, tolerance);
+
+				// Generate a glow effect using the mask.
 				cv::Mat dst_rgba;
 				glow_blow(grayscale_mask, dst_rgba, param_KeyLevel, 10);
 
-				// Ensure we are working in RGBA format, which is needed for subsequent blending.
 				if (dst_rgba.channels() != 4) {
 					cv::cvtColor(dst_rgba, dst_rgba, cv::COLOR_BGR2RGBA);
 				}
 
-				// Perform a mipmap-like operation on the mask to generate an additional overlay or effect.
-				cv::Mat mipmap_result;
-				apply_mipmap(grayscale_mask, mipmap_result, static_cast<float>(default_scale), param_KeyLevel);
+				// cv::Mat mask_rgba;
+				// cv::cvtColor(grayscale_mask, mask_rgba, cv::COLOR_GRAY2BGRA);
 
-				// Combine the original frame, the blow effect, and the mipmap result into a final RGBA image.
-				// `mix_images` handles per-pixel alpha blending logic.
+				cv::Mat src_rgba;
+				if (original_frames[i].channels() != 4) {
+					cv::cvtColor(original_frames[i], src_rgba, cv::COLOR_BGR2BGRA);
+				}
+				else {
+					src_rgba = original_frames[i].clone();
+				}
+
+				// Prepare the output image.
 				cv::Mat final_result;
-				mix_images(original_frames[i], dst_rgba, mipmap_result, final_result, param_KeyScale);
+				final_result.create(src_rgba.size(), CV_8UC4);
 
-				// Show the processed frame in a window for real-time preview.
-				// Pressing 'q' will stop processing immediately.
+				// Call the unified GPU function.
+				// Note: The filter_and_blend function expects pointers to continuous memory (uchar4 arrays).
+				// We reinterpret the cv::Mat data pointer accordingly.
+				filter_and_blend(src_rgba.cols, src_rgba.rows, default_scale, param_KeyScale,
+					reinterpret_cast<uchar4*>(mask_rgba.data),
+					reinterpret_cast<uchar4*>(dst_rgba.data),
+					reinterpret_cast<uchar4*>(src_rgba.data),
+					reinterpret_cast<uchar4*>(final_result.data));
+
+				// Display the processed frame.
 				cv::imshow("Processed Frame", final_result);
 				int key = cv::waitKey(30);
 				if (key == 'q') {
@@ -564,37 +491,157 @@ void glow_effect_video(const char* video_nm) {
 					return;
 				}
 
-
 				output_video.write(final_result);
 
-				// Save the processed frame.
-				/*std::string frame_output_path = output_folder + "/frame_" + std::to_string(frame_count++) + ".png";
-				cv::imwrite(frame_output_path, final_result);*/
 			}
 		}
 		else {
-			// If segmentation fails or no masks are generated, print a warning and continue.
 			std::cerr << "Warning: No grayscale mask generated for this batch." << std::endl;
 		}
 	}
 
-	// When we reach here, we've either processed all frames or encountered a break condition.
+	// Release video resources and close display windows.
+	video.release();
+	output_video.release();
+	cudaFreeHost(h_frame);
+	cv::destroyAllWindows();
+
+	std::cout << "Video processing completed. Saved to: " << output_video_path << std::endl;
+}
 
 
 
-	// Create the output video from processed frames.
-	/*std::string output_video_path = output_folder + "/processed_video.avi";
-	cv::VideoWriter output_video(output_video_path, cv::VideoWriter::fourcc('M', 'J', 'P', 'G'), fps,
-		cv::Size(frame_width, frame_height));
 
-	// If the output video file fails to open, log an error and return.
-	if (!output_video.isOpened()) {
-		std::cerr << "Error: Could not open the output video file for writing: "
-			<< output_video_path << std::endl;
+void glow_effect_video(const char* video_nm) {
+	auto start_time = std::chrono::high_resolution_clock::now();
+	// Print OpenCV build information for debugging.
+	cv::String info = cv::getBuildInformation();
+	std::cout << info << std::endl;
+
+	cv::VideoCapture video;
+	bool pause = false;
+
+	// Open the video file.
+	if (!video.open(video_nm, cv::VideoCaptureAPIs::CAP_ANY)) {
+		std::cerr << "Error: Could not open video file: " << video_nm << std::endl;
 		return;
 	}
 
-	// Loop through all the frames we saved as PNG files in the output folder.
+	// Retrieve video parameters.
+	int frame_width = static_cast<int>(video.get(cv::CAP_PROP_FRAME_WIDTH));
+	int frame_height = static_cast<int>(video.get(cv::CAP_PROP_FRAME_HEIGHT));
+	int fps = static_cast<int>(video.get(cv::CAP_PROP_FPS));
+
+	// Create an output folder for processed frames.
+	std::string output_folder = "./VideoOutput";
+	std::filesystem::create_directory(output_folder);
+
+	// Define the TensorRT plan file path for segmentation.
+	std::string planFilePath = "D:/csi4900/TRT-Plans/mobileone_s4.lw.plan";          // user config
+
+	cv::Mat src_img, dst_img;
+	int frame_count = 0; // Counter for saved frames.
+
+	while (video.isOpened()) {
+		// Prepare a batch of frames.
+		std::vector<torch::Tensor> batch_frames;
+		std::vector<cv::Mat> original_frames;
+
+		for (int i = 0; i < 4; ++i) {
+			if (!video.read(src_img) || src_img.empty()) {
+				if (batch_frames.empty()) break; // End of video.
+				batch_frames.push_back(batch_frames.back()); // Pad batch with last frame.
+				original_frames.push_back(original_frames.back().clone());
+				continue;
+			}
+
+			original_frames.push_back(src_img.clone());
+
+			// Resize the frame to 384x384 for inference.
+			cv::Mat resized_img;
+			cv::resize(src_img, resized_img, cv::Size(384, 384));
+
+			// Save temporary resized image.
+			std::string temp_img_path = "./temp_video_frame_" + std::to_string(i) + ".png";
+			cv::imwrite(temp_img_path, resized_img);
+
+			// Convert the image to a tensor.
+			torch::Tensor frame_tensor = ImageProcessingUtil::process_img(temp_img_path, false);
+			frame_tensor = frame_tensor.to(torch::kFloat);
+			batch_frames.push_back(frame_tensor);
+
+			// Remove the temporary file.
+			std::filesystem::remove(temp_img_path);
+		}
+
+		if (batch_frames.empty()) break; // All frames processed.
+
+		// Pad batch if it contains fewer than 4 frames.
+		while (batch_frames.size() < 4) {
+			batch_frames.push_back(batch_frames.back());
+			original_frames.push_back(original_frames.back().clone());
+		}
+
+		// Stack tensors into a batch.
+		torch::Tensor batch_tensor = torch::stack(batch_frames, 0); // Shape: [4, 3, 384, 384]
+
+		// Perform TensorRT inference to obtain segmentation masks.
+		std::vector<cv::Mat> grayscale_masks = TRTInference::measure_segmentation_trt_performance_mul(planFilePath, batch_tensor, 1);
+
+		if (!grayscale_masks.empty()) {
+			for (int i = 0; i < 4; ++i) {
+				cv::Mat grayscale_mask;
+				cv::resize(grayscale_masks[i], grayscale_mask, original_frames[i].size());
+
+				// Generate a glow effect using the mask.
+				cv::Mat dst_rgba;
+				glow_blow(grayscale_mask, dst_rgba, param_KeyLevel, 10);
+
+				if (dst_rgba.channels() != 4) {
+					cv::cvtColor(dst_rgba, dst_rgba, cv::COLOR_BGR2RGBA);
+				}
+
+				// Apply mipmap operations.
+				cv::Mat mipmap_result;
+				apply_mipmap(grayscale_mask, mipmap_result, static_cast<float>(default_scale), param_KeyLevel);
+
+				// Blend frames using the glow effect and mipmap results.
+				cv::Mat final_result;
+				mix_images(original_frames[i], dst_rgba, mipmap_result, final_result, param_KeyScale);
+
+				// Display the processed frame.
+				cv::imshow("Processed Frame", final_result);
+				int key = cv::waitKey(30);
+				if (key == 'q') {
+					video.release();
+					cv::destroyAllWindows();
+					return;
+				}
+
+				// Save the processed frame.
+				std::string frame_output_path = output_folder + "/frame_" + std::to_string(frame_count++) + ".png";
+				cv::imwrite(frame_output_path, final_result);
+			}
+		}
+		else {
+			std::cerr << "Warning: No grayscale mask generated for this batch." << std::endl;
+		}
+	}
+
+	// Release video resources and close display windows.
+	video.release();
+	cv::destroyAllWindows();
+
+	// Create the output video from processed frames.
+	std::string output_video_path = output_folder + "/processed_video.avi";
+	cv::VideoWriter output_video(output_video_path, cv::VideoWriter::fourcc('M', 'J', 'P', 'G'), fps,
+		cv::Size(frame_width, frame_height));
+
+	if (!output_video.isOpened()) {
+		std::cerr << "Error: Could not open the output video file for writing: " << output_video_path << std::endl;
+		return;
+	}
+
 	for (int i = 0; i < frame_count; ++i) {
 		std::string frame_path = output_folder + "/frame_" + std::to_string(i) + ".png";
 		cv::Mat frame = cv::imread(frame_path);
@@ -602,16 +649,20 @@ void glow_effect_video(const char* video_nm) {
 			std::cerr << "Warning: Could not read frame: " << frame_path << std::endl;
 			continue;
 		}
-		// Write this frame into the final video file.
 		output_video.write(frame);
-	}*/
+	}
 
-
-	video.release();
 	output_video.release();
-	cudaFreeHost(h_frame);
-	cv::destroyAllWindows();
-
-	// Indicate that processing has completed successfully.
 	std::cout << "Video processing completed. Saved to: " << output_video_path << std::endl;
+
+	auto end_time = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<double>elapsed = end_time - start_time;
+
+	double avg_frame_process = elapsed.count() / frame_count;
+	double frames_per_second = 1.0 / avg_frame_process;
+
+	std::cout << "Glow effect total processing time: " << elapsed.count() << " seconds." << std::endl;
+	std::cout << "Total number of frames processed: " << frame_count << " frames." << std::endl;
+	std::cout << "Average frame process time: " << avg_frame_process << " seconds/frame." << std::endl;
+	std::cout << "Frames per second (fps): " << frames_per_second << " fps." << std::endl;
 }

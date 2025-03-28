@@ -1,688 +1,834 @@
 ﻿/**
- * @file TRTInference.cpp
- * @brief Implementation of TensorRT inference routines for segmentation and super-resolution.
- */
-
- /**
-  * @note You probably need to change the output path labeled with "pngOutput"
-  *       to match your own directory structure.
-  */
+* you probably need to change the output path labeled 
+*/
 
 #include "TRTInference.hpp"
 #include "ImageProcessingUtil.hpp" 
 #include "nvToolsExt.h"
 
-  /**
-   * @brief Perform TensorRT segmentation inference on a single image and measure performance.
-   *
-   * This function:
-   * 1. Loads a TensorRT plan file into memory.
-   * 2. Deserializes the engine and creates an execution context.
-   * 3. Allocates pinned (host) and device memory for input/output.
-   * 4. Copies input data to device memory.
-   * 5. Runs warm-up inference to ensure GPU caches and contexts are prepared.
-   * 6. Measures the latency over a specified number of trials.
-   * 7. Copies the last output tensor back to host, calculates min/max/avg, and saves a visualization.
-   *
-   * @param[in] trt_plan   Path to the serialized TensorRT engine plan file.
-   * @param[in] img_tensor A 4D tensor (NCHW) containing the preprocessed input image data.
-   * @param[in] num_trials Number of inference runs for performance measurement.
-   */
+
+// Single Image Segmantion Inference
 void TRTInference::measure_segmentation_trt_performance(const string& trt_plan, torch::Tensor img_tensor, int num_trials) {
 
-	std::cout << "STARTING measure_trt_performance" << std::endl;
+    std::cout << "STARTING measure_trt_performance" << std::endl;
+    TRTGeneration::CustomLogger myLogger; 
+    IRuntime* runtime = createInferRuntime(myLogger);
 
-	// Create custom logger for TensorRT and load the serialized plan file
-	TRTGeneration::CustomLogger myLogger;
-	IRuntime* runtime = createInferRuntime(myLogger);
+    // reads file in binary w/o preprocessing
+    ifstream planFile(trt_plan, ios::binary);
+    vector<char> plan((istreambuf_iterator<char>(planFile)),istreambuf_iterator<char>());
+    
+    ICudaEngine* engine = runtime->deserializeCudaEngine(plan.data(), plan.size());
+    IExecutionContext* context = engine->createExecutionContext();
+    if (!engine || !context) {
+        cerr << "Failed to deserialize engine or create execution context." << endl;
+        exit(EXIT_FAILURE);
+    }
 
-	// Read the plan file in binary mode
-	ifstream planFile(trt_plan, ios::binary);
-	vector<char> plan((istreambuf_iterator<char>(planFile)), istreambuf_iterator<char>());
+    float* h_input;
+    int input_size = img_tensor.numel();  // Get total number of elements in the tensor
+    cudaMallocHost((void**)&h_input, input_size * sizeof(float)); // Pinned memory
 
-	// Deserialize the CUDA engine from the plan
-	ICudaEngine* engine = runtime->deserializeCudaEngine(plan.data(), plan.size());
-	IExecutionContext* context = engine->createExecutionContext();
-	if (!engine || !context) {
-		cerr << "Failed to deserialize engine or create execution context." << endl;
-		exit(EXIT_FAILURE);
-	}
+    int numBindings = engine->getNbBindings();
+    nvinfer1::Dims4 inputDims;
+    nvinfer1::Dims outputDims;
+    
+    std::vector<int> outputBindingIndices;
+    std::vector<std::string> outputTensorNames;
 
-	// Allocate pinned host memory for the input tensor
-	float* h_input;
-	int input_size = img_tensor.numel();  // total number of elements in the input tensor
-	cudaMallocHost((void**)&h_input, input_size * sizeof(float)); // pinned memory
+    for (int i = 1; i < numBindings; ++i) {
+        outputBindingIndices.push_back(i);
+        std::string outputTensorName = engine->getBindingName(i);
+        outputTensorNames.push_back(outputTensorName);
+    }
 
-	// Retrieve the number of bindings from the engine
-	int numBindings = engine->getNbBindings();
-	nvinfer1::Dims4 inputDims;
-	nvinfer1::Dims outputDims;
+    // Extract the dimensions from img_tensor, assuming the input tensor format is 4D: NCHW
+    inputDims.d[0] = img_tensor.size(0);
+    inputDims.d[1] = img_tensor.size(1);
+    inputDims.d[2] = img_tensor.size(2);
+    inputDims.d[3] = img_tensor.size(3);
+    context->setBindingDimensions(0, inputDims);  // setting dimensions for binding 0, input tensor
 
-	// We collect the indices of all output bindings
-	std::vector<int> outputBindingIndices;
-	std::vector<std::string> outputTensorNames;
-	for (int i = 1; i < numBindings; ++i) {
-		outputBindingIndices.push_back(i);
-		std::string outputTensorName = engine->getBindingName(i);
-		outputTensorNames.push_back(outputTensorName);
-	}
+    std::vector<void*> d_outputs;
+    std::vector<float*> h_outputs;
+    std::vector<void*> bindings;
 
-	// Extract the dimensions from the input tensor (assuming the format is 4D: NCHW)
-	inputDims.d[0] = img_tensor.size(0);
-	inputDims.d[1] = img_tensor.size(1);
-	inputDims.d[2] = img_tensor.size(2);
-	inputDims.d[3] = img_tensor.size(3);
+    // Create CUDA stream
+    cudaStream_t stream;
+    cudaStreamCreate(&stream);
 
-	// Set the binding dimensions for the input (binding index 0)
-	context->setBindingDimensions(0, inputDims);
+    // Allocate device memory for input and add to bindings
+    void* d_input;
+    cudaMalloc(&d_input, input_size * sizeof(float));
 
-	// We'll store output pointers (host and device) in vectors
-	std::vector<void*> d_outputs;
-	std::vector<float*> h_outputs;
-	std::vector<void*> bindings;
+    // Copy data from img_tensor to h_input
+    std::memcpy(h_input, img_tensor.data_ptr<float>(), input_size * sizeof(float));
 
-	// Create a CUDA stream for asynchronous operations
-	cudaStream_t stream;
-	cudaStreamCreate(&stream);
+    // Transfer input data to GPU with error check
+    cudaError_t mallocErr = cudaMemcpyAsync(d_input, h_input, input_size * sizeof(float), cudaMemcpyHostToDevice, stream);
+    if (mallocErr != cudaSuccess) {
+        cerr << "CUDA error (cudaMemcpyAsync): " << cudaGetErrorString(mallocErr) << endl;
+        exit(EXIT_FAILURE);
+    }
+    bindings.push_back(d_input);
 
-	// Allocate device memory for the input and add it to the bindings list
-	void* d_input;
-	cudaMalloc(&d_input, input_size * sizeof(float));
+    // Handle dynamic dimensions
+    for (int i : outputBindingIndices) {
+        outputDims = engine->getBindingDimensions(i);
 
-	// Copy data from the img_tensor to the pinned host memory
-	std::memcpy(h_input, img_tensor.data_ptr<float>(), input_size * sizeof(float));
+        for (int j = 0; j < outputDims.nbDims; ++j) {
+            if (outputDims.d[j] < 0) {
+                outputDims.d[j] = inputDims.d[j];
+            }
+        }
 
-	// Asynchronously copy input data from host to device
-	cudaError_t mallocErr = cudaMemcpyAsync(d_input, h_input, input_size * sizeof(float), cudaMemcpyHostToDevice, stream);
-	if (mallocErr != cudaSuccess) {
-		cerr << "CUDA error (cudaMemcpyAsync): " << cudaGetErrorString(mallocErr) << endl;
-		exit(EXIT_FAILURE);
-	}
-	bindings.push_back(d_input);
+        int outputSize = outputDims.d[0] * outputDims.d[1] * outputDims.d[2] * outputDims.d[3];
+        float* h_output = new float[outputSize];
+        void* d_output;
 
-	// Handle dynamic dimensions for all output bindings
-	for (int i : outputBindingIndices) {
-		outputDims = engine->getBindingDimensions(i);
+        cudaError_t status = cudaMalloc(&d_output, outputSize * sizeof(float));
+        if (status != cudaSuccess) {
+            cerr << "Device memory allocation failed" << endl;
+            exit(EXIT_FAILURE);
+        }
 
-		// If the model uses dynamic dimensions, fill in the batch/width/height from inputDims
-		for (int j = 0; j < outputDims.nbDims; ++j) {
-			if (outputDims.d[j] < 0) {
-				outputDims.d[j] = inputDims.d[j];
-			}
-		}
+        h_outputs.push_back(h_output);
+        d_outputs.push_back(d_output);
+        bindings.push_back(d_output);
+    }
 
-		// Compute total output size
-		int outputSize = outputDims.d[0] * outputDims.d[1] * outputDims.d[2] * outputDims.d[3];
+    vector<float> latencies;
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
 
-		// Allocate host and device memory for this output
-		float* h_output = new float[outputSize];
-		void* d_output;
-		cudaError_t status = cudaMalloc(&d_output, outputSize * sizeof(float));
-		if (status != cudaSuccess) {
-			cerr << "Device memory allocation failed" << endl;
-			exit(EXIT_FAILURE);
-		}
+    // warm up
+    for (int i = 0; i < 10; ++i) {
+        context->enqueueV2(bindings.data(), stream, nullptr);
+    }
 
-		h_outputs.push_back(h_output);
-		d_outputs.push_back(d_output);
-		bindings.push_back(d_output);
-	}
+    cudaEventRecord(start, stream);
+    // nvtxRangePush("Inference");
+    // Annotate using nvtx around inference
+    for (int i = 0; i < num_trials; ++i) {
+        // Run asynchronous inference using enqueueV2
+        char str_buf[100];
+        std::sprintf(str_buf, "frame%03d", i);
+        nvtxRangePushA(str_buf);
+        if (!context->enqueueV2(bindings.data(), stream, nullptr)) {
+            cerr << "TensorRT enqueueV2 failed!" << endl;
+            exit(EXIT_FAILURE);
+        }
+        nvtxRangePop();
+    }
 
-	// Prepare to measure latency
-	vector<float> latencies;
-	cudaEvent_t start, stop;
-	cudaEventCreate(&start);
-	cudaEventCreate(&stop);
+    cudaEventRecord(stop, stream);
+    cudaEventSynchronize(stop);
 
-	// Warm-up (run inference several times before actual measurements)
-	for (int i = 0; i < 10; ++i) {
-		context->enqueueV2(bindings.data(), stream, nullptr);
-	}
+    float milliseconds = 0;
+    cudaEventElapsedTime(&milliseconds, start, stop);
 
-	// Record the start event and run multiple inference trials
-	cudaEventRecord(start, stream);
-	for (int i = 0; i < num_trials; ++i) {
-		// Provide NVTX annotation (optional), helpful for profiling in Nsight Systems
-		char str_buf[100];
-		std::sprintf(str_buf, "frame%03d", i);
-		nvtxRangePushA(str_buf);
+    latencies.push_back(milliseconds);
 
-		// Run asynchronous inference
-		if (!context->enqueueV2(bindings.data(), stream, nullptr)) {
-			cerr << "TensorRT enqueueV2 failed!" << endl;
-			exit(EXIT_FAILURE);
-		}
-		nvtxRangePop();
-	}
-	// Record the stop event and synchronize
-	cudaEventRecord(stop, stream);
-	cudaEventSynchronize(stop);
+    ///////////////////////////////////////////
+    ///////////// POST PROCESSING /////////////
+    ///////////////////////////////////////////
 
-	// Calculate elapsed time in milliseconds
-	float milliseconds = 0;
-	cudaEventElapsedTime(&milliseconds, start, stop);
-	latencies.push_back(milliseconds);
+    // Copy last output tensor back to host after all trials
+    float* last_h_output = h_outputs.back();
+    void* last_d_output = d_outputs.back();
+    int last_output_size = outputDims.d[0] * outputDims.d[1] * outputDims.d[2] * outputDims.d[3];
+    // cudaMemcpy(last_h_output, last_d_output, last_output_size * sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpyAsync(last_h_output, last_d_output, last_output_size * sizeof(float), cudaMemcpyDeviceToHost, stream);
+    cudaStreamSynchronize(stream);
 
-	// Copy the last output tensor back to host (the last item in h_outputs / d_outputs)
-	float* last_h_output = h_outputs.back();
-	void* last_d_output = d_outputs.back();
-	int last_output_size = outputDims.d[0] * outputDims.d[1] * outputDims.d[2] * outputDims.d[3];
-	cudaMemcpyAsync(last_h_output, last_d_output, last_output_size * sizeof(float), cudaMemcpyDeviceToHost, stream);
-	cudaStreamSynchronize(stream);
+    // Calculate stats for the last tensor
+    float min_val = *min_element(last_h_output, last_h_output + last_output_size);
+    float max_val = *max_element(last_h_output, last_h_output + last_output_size);
+    float avg_val = accumulate(last_h_output, last_h_output + last_output_size, 0.0f) / last_output_size;
+    cout << "Last Output Tensor - Min: " << min_val << ", Max: " << max_val << ", Avg: " << avg_val << endl;
 
-	// Compute min, max, and avg values in the final output (mostly for debugging/analysis)
-	float min_val = *std::min_element(last_h_output, last_h_output + last_output_size);
-	float max_val = *std::max_element(last_h_output, last_h_output + last_output_size);
-	float avg_val = std::accumulate(last_h_output, last_h_output + last_output_size, 0.0f) / last_output_size;
-	cout << "Last Output Tensor - Min: " << min_val << ", Max: " << max_val << ", Avg: " << avg_val << endl;
+    float average_latency = accumulate(latencies.begin(), latencies.end(), 0.0f) / num_trials;
+    cout << "TRT - Average Latency over " << num_trials << " trials: " << average_latency << " ms" << endl;
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
 
-	// Compute average latency over the measured trials
-	float average_latency = std::accumulate(latencies.begin(), latencies.end(), 0.0f) / num_trials;
-	cout << "TRT - Average Latency over " << num_trials << " trials: " << average_latency << " ms" << endl;
+    // FIX THE MAX LINE
+    int batch = outputDims.d[0]; // Assuming the channel dimension (classes) is at index 1
+    int num_classes = outputDims.d[1]; // Assuming the channel dimension (classes) is at index 1
+    int height = outputDims.d[2];
+    int width = outputDims.d[3];
+    
+    auto last_output_tensor = torch::from_blob(last_h_output, {batch, num_classes, height, width}, torch::kFloat32);
 
-	// Clean up CUDA events
-	cudaEventDestroy(start);
-	cudaEventDestroy(stop);
+    // Debug: Print shape and content of the last output tensor
+    std::cout << "\nNumber of dimensions(last_output_tensor): " << last_output_tensor.dim() << std::endl;
+    for (int i = 0; i < last_output_tensor.dim(); ++i) {
+            std::cout << last_output_tensor.size(i) << " ";
+        }
+    std::cout << std::endl;
 
-	// Prepare the output for saving or further post-processing:
-	int batch = outputDims.d[0];
-	int num_classes = outputDims.d[1];
-	int height = outputDims.d[2];
-	int width = outputDims.d[3];
+    // max returns -> {max values}, {max indices}
+    auto max_out = torch::max(last_output_tensor, 1);
+    auto class_labels = std::get<1>(max_out);
 
-	// Wrap the output in a Torch tensor for easy post-processing
-	auto last_output_tensor = torch::from_blob(last_h_output, { batch, num_classes, height, width }, torch::kFloat32);
 
-	// Print shape for debugging
-	std::cout << "\nNumber of dimensions(last_output_tensor): " << last_output_tensor.dim() << std::endl;
-	for (int i = 0; i < last_output_tensor.dim(); ++i) {
-		std::cout << last_output_tensor.size(i) << " ";
-	}
-	std::cout << std::endl;
+    int scale = 255 / 21;
+    auto scale_tensor = torch::tensor(scale, class_labels.options());
+    auto image_post = class_labels * scale;
 
-	// Compute the argmax across the classes dimension
-	auto max_out = torch::max(last_output_tensor, 1);
-	auto class_labels = std::get<1>(max_out);
+    std::cout << "\nNumber of dimensions(image_post): " << image_post.dim() << std::endl;
+    for (int i = 0; i < image_post.dim(); ++i) {
+        std::cout << image_post.size(i) << " ";
+    }
+    std::cout << std::endl;
 
-	// Simple scaling to produce a grayscale visualization
-	int scale = 255 / 21;
-	auto scale_tensor = torch::tensor(scale, class_labels.options());
-	auto image_post = class_labels * scale;
+    // chw to hwc
+    auto permuted_img = image_post.permute({1, 2, 0}).to(torch::kU8);
 
-	std::cout << "\nNumber of dimensions(image_post): " << image_post.dim() << std::endl;
-	for (int i = 0; i < image_post.dim(); ++i) {
-		std::cout << image_post.size(i) << " ";
-	}
-	std::cout << std::endl;
+    std::cout << "Number of dimensions(permuted_img): " << permuted_img.dim() << std::endl;
+    for (int i = 0; i < permuted_img.dim(); ++i) {
+        std::cout << permuted_img.size(i) << " ";
+    }
+ 
+    cv::Mat cv_img(permuted_img.size(0), permuted_img.size(1), CV_8UC1, permuted_img.data_ptr<uchar>());
 
-	// Convert from NCHW to HWC (though for single-channel, it's effectively HxWx1)
-	auto permuted_img = image_post.permute({ 1, 2, 0 }).to(torch::kU8);
-	std::cout << "Number of dimensions(permuted_img): " << permuted_img.dim() << std::endl;
-	for (int i = 0; i < permuted_img.dim(); ++i) {
-		std::cout << permuted_img.size(i) << " ";
-	}
+    try {
+        ///////////////////////////////////////////////////////////////////
+        cv::imwrite("pngOutput/trt_seg_output_scaled.png", cv_img);        // use your own path
+        //////////////////////////////////////////////////////////////////
 
-	// Convert to OpenCV Mat
-	cv::Mat cv_img(permuted_img.size(0), permuted_img.size(1), CV_8UC1, permuted_img.data_ptr<uchar>());
+        cout << "Saved IMG: trt_seg_output_scaled" << endl; 
+    } catch (const cv::Exception& ex) {
+        cerr << "Failed to save image trt_seg_output_scaled because ERROR:" << ex.what() << endl;
+    }
 
-	// Save the output
-	try {
-		cv::imwrite("pngOutput/trt_seg_output_scaled.png", cv_img); // Replace with your own path
-		cout << "Saved IMG: trt_seg_output_scaled" << endl;
-	}
-	catch (const cv::Exception& ex) {
-		cerr << "Failed to save image trt_seg_output_scaled because ERROR:" << ex.what() << endl;
-	}
-
-	// Clean up memory
-	cudaFreeHost(h_input);
-	for (float* h_output : h_outputs) {
-		delete[] h_output;
-	}
-	cudaFree(d_input);
-	for (void* d_output : d_outputs) {
-		cudaFree(d_output);
-	}
-
-	context->destroy();
-	engine->destroy();
-	runtime->destroy();
-	cudaStreamDestroy(stream);
+    // Clean up
+    cudaFreeHost(h_input);
+    for (float* h_output : h_outputs) {
+        delete[] h_output;
+    }
+    cudaFree(d_input);
+    for (void* d_output : d_outputs) {
+        cudaFree(d_output);
+    }
+    context->destroy();
+    engine->destroy();
+    runtime->destroy();
+    cudaStreamDestroy(stream); 
 }
 
 
 
 /**
- * @brief Perform TensorRT segmentation inference on multiple images at once (batch) and measure performance.
- *
- * This function:
- * 1. Loads a TensorRT plan file and deserializes it into a CUDA engine.
- * 2. Handles batched input (4D NCHW).
- * 3. Allocates memory for input/output on host (pinned) and device.
- * 4. Executes inference multiple times for latency measurement.
- * 5. Retrieves the final output, converts each batch slice into a grayscale visualization.
- * 6. Returns a vector of OpenCV Mats for further usage (e.g., post-processing or saving).
- *
- * @param[in] trt_plan         Path to the TensorRT engine plan file.
- * @param[in] img_tensor_batch A 4D tensor (NCHW) containing batched preprocessed images.
- * @param[in] num_trials       Number of inference runs for performance measurement.
- * @return A vector of OpenCV Mats, each representing a grayscale segmentation map for the corresponding batch entry.
- */
+* Multiple Image Segmentation Inference
+* This function is used in glow_effect::glow_effect_video function
+*/
 std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_mul(const string& trt_plan, torch::Tensor img_tensor_batch, int num_trials) {
-	std::vector<cv::Mat> grayscale_images;  // will store each grayscale image
+    std::vector<cv::Mat> grayscale_images;  // for saving each gray-scaled imaghe
 
-	std::cout << "STARTING measure_segmentation_trt_performance_mul" << std::endl;
+    std::cout << "STARTING measure_segmentation_trt_performance_mul" << std::endl;
+    TRTGeneration::CustomLogger myLogger;
+    IRuntime* runtime = createInferRuntime(myLogger);
 
-	// Create logger and runtime
-	TRTGeneration::CustomLogger myLogger;
-	IRuntime* runtime = createInferRuntime(myLogger);
+    // reads file in binary w/o preprocessing
+    ifstream planFile(trt_plan, ios::binary);
+    vector<char> plan((istreambuf_iterator<char>(planFile)), istreambuf_iterator<char>());
 
-	// Read plan file
-	ifstream planFile(trt_plan, ios::binary);
-	vector<char> plan((istreambuf_iterator<char>(planFile)), istreambuf_iterator<char>());
+    ICudaEngine* engine = runtime->deserializeCudaEngine(plan.data(), plan.size());
+    IExecutionContext* context = engine->createExecutionContext();
+    if (!engine || !context) {
+        cerr << "Failed to deserialize engine or create execution context." << endl;
+        exit(EXIT_FAILURE);
+    }
 
-	// Deserialize engine
-	ICudaEngine* engine = runtime->deserializeCudaEngine(plan.data(), plan.size());
-	IExecutionContext* context = engine->createExecutionContext();
-	if (!engine || !context) {
-		cerr << "Failed to deserialize engine or create execution context." << endl;
-		exit(EXIT_FAILURE);
-	}
+    float* h_input;
+    int input_size = img_tensor_batch.numel();  // Get total number of elements in the tensor
+    cudaMallocHost((void**)&h_input, input_size * sizeof(float)); // Pinned memory
 
-	// Allocate pinned host memory for batched input
-	float* h_input;
-	int input_size = img_tensor_batch.numel();
-	cudaMallocHost((void**)&h_input, input_size * sizeof(float)); // pinned memory
+    int numBindings = engine->getNbBindings();
+    nvinfer1::Dims4 inputDims;
+    nvinfer1::Dims outputDims;
 
-	int numBindings = engine->getNbBindings();
-	nvinfer1::Dims4 inputDims;
-	nvinfer1::Dims outputDims;
+    std::vector<int> outputBindingIndices;
+    std::vector<std::string> outputTensorNames;
 
-	// Identify output bindings
-	std::vector<int> outputBindingIndices;
-	std::vector<std::string> outputTensorNames;
-	for (int i = 1; i < numBindings; ++i) {
-		outputBindingIndices.push_back(i);
-		std::string outputTensorName = engine->getBindingName(i);
-		outputTensorNames.push_back(outputTensorName);
-	}
+    for (int i = 1; i < numBindings; ++i) {
+        outputBindingIndices.push_back(i);
+        std::string outputTensorName = engine->getBindingName(i);
+        outputTensorNames.push_back(outputTensorName);
+    }
 
-	// Set input dimensions (assuming NCHW format)
-	inputDims.d[0] = img_tensor_batch.size(0);
-	inputDims.d[1] = img_tensor_batch.size(1);
-	inputDims.d[2] = img_tensor_batch.size(2);
-	inputDims.d[3] = img_tensor_batch.size(3);
-	context->setBindingDimensions(0, inputDims);
+    // Extract the dimensions from img_tensor_batch, assuming the input tensor format is 4D: NCHW
+    inputDims.d[0] = img_tensor_batch.size(0);
+    inputDims.d[1] = img_tensor_batch.size(1);
+    inputDims.d[2] = img_tensor_batch.size(2);
+    inputDims.d[3] = img_tensor_batch.size(3);
+    context->setBindingDimensions(0, inputDims);  // setting dimensions for binding 0, input tensor
 
-	// Prepare vectors to hold output data (host and device)
-	std::vector<void*> d_outputs;
-	std::vector<float*> h_outputs;
-	std::vector<void*> bindings;
+    std::vector<void*> d_outputs;
+    std::vector<float*> h_outputs;
+    std::vector<void*> bindings;
 
-	// Create CUDA stream
-	cudaStream_t stream;
-	cudaStreamCreate(&stream);
+    // Create CUDA stream
+    cudaStream_t stream;
+    cudaStreamCreate(&stream);
 
-	// Allocate device memory for input
-	void* d_input;
-	cudaMalloc(&d_input, input_size * sizeof(float));
+    // Allocate device memory for input and add to bindings
+    void* d_input;
+    cudaMalloc(&d_input, input_size * sizeof(float));
 
-	// Copy data from tensor to pinned host buffer
-	std::memcpy(h_input, img_tensor_batch.data_ptr<float>(), input_size * sizeof(float));
+    // Copy data from img_tensor_batch to h_input
+    std::memcpy(h_input, img_tensor_batch.data_ptr<float>(), input_size * sizeof(float));
 
-	// Transfer data to GPU
-	cudaError_t mallocErr = cudaMemcpyAsync(d_input, h_input, input_size * sizeof(float), cudaMemcpyHostToDevice, stream);
-	if (mallocErr != cudaSuccess) {
-		cerr << "CUDA error (cudaMemcpyAsync): " << cudaGetErrorString(mallocErr) << endl;
-		exit(EXIT_FAILURE);
-	}
-	bindings.push_back(d_input);
+    // Transfer input data to GPU with error check
+    cudaError_t mallocErr = cudaMemcpyAsync(d_input, h_input, input_size * sizeof(float), cudaMemcpyHostToDevice, stream);
+    if (mallocErr != cudaSuccess) {
+        cerr << "CUDA error (cudaMemcpyAsync): " << cudaGetErrorString(mallocErr) << endl;
+        exit(EXIT_FAILURE);
+    }
+    bindings.push_back(d_input);
 
-	// Allocate and bind outputs
-	for (int i : outputBindingIndices) {
-		outputDims = engine->getBindingDimensions(i);
-		// Handle dynamic shape
-		for (int j = 0; j < outputDims.nbDims; ++j) {
-			if (outputDims.d[j] < 0) {
-				outputDims.d[j] = inputDims.d[j];
-			}
-		}
+    // Handle dynamic dimensions
+    for (int i : outputBindingIndices) {
+        outputDims = engine->getBindingDimensions(i);
 
-		int outputSize = outputDims.d[0] * outputDims.d[1] * outputDims.d[2] * outputDims.d[3];
-		float* h_output = new float[outputSize];
-		void* d_output;
-		cudaError_t status = cudaMalloc(&d_output, outputSize * sizeof(float));
-		if (status != cudaSuccess) {
-			cerr << "Device memory allocation failed" << endl;
-			exit(EXIT_FAILURE);
-		}
+        for (int j = 0; j < outputDims.nbDims; ++j) {
+            if (outputDims.d[j] < 0) {
+                outputDims.d[j] = inputDims.d[j];
+            }
+        }
 
-		h_outputs.push_back(h_output);
-		d_outputs.push_back(d_output);
-		bindings.push_back(d_output);
-	}
+        int outputSize = outputDims.d[0] * outputDims.d[1] * outputDims.d[2] * outputDims.d[3];
+        float* h_output = new float[outputSize];
+        void* d_output;
 
-	// Performance measurement setup
-	vector<float> latencies;
-	cudaEvent_t start, stop;
-	cudaEventCreate(&start);
-	cudaEventCreate(&stop);
+        cudaError_t status = cudaMalloc(&d_output, outputSize * sizeof(float));
+        if (status != cudaSuccess) {
+            cerr << "Device memory allocation failed" << endl;
+            exit(EXIT_FAILURE);
+        }
 
-	// Warm up inference
-	for (int i = 0; i < 10; ++i) {
-		context->enqueueV2(bindings.data(), stream, nullptr);
-	}
+        h_outputs.push_back(h_output);
+        d_outputs.push_back(d_output);
+        bindings.push_back(d_output);
+    }
 
-	// Time multiple runs of inference
-	cudaEventRecord(start, stream);
-	for (int i = 0; i < num_trials; ++i) {
-		char str_buf[100];
-		std::sprintf(str_buf, "frame%03d", i);
-		nvtxRangePushA(str_buf);
-		if (!context->enqueueV2(bindings.data(), stream, nullptr)) {
-			cerr << "TensorRT enqueueV2 failed!" << endl;
-			exit(EXIT_FAILURE);
-		}
-		nvtxRangePop();
-	}
+    vector<float> latencies;
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
 
-	cudaEventRecord(stop, stream);
-	cudaEventSynchronize(stop);
+    // warm up
+    for (int i = 0; i < 10; ++i) {
+        context->enqueueV2(bindings.data(), stream, nullptr);
+    }
 
-	float milliseconds = 0;
-	cudaEventElapsedTime(&milliseconds, start, stop);
-	latencies.push_back(milliseconds);
+    cudaEventRecord(start, stream);
+    // nvtxRangePush("Inference");
+    // Annotate using nvtx around inference
+    for (int i = 0; i < num_trials; ++i) {
+        // Run asynchronous inference using enqueueV2
+        char str_buf[100];
+        std::sprintf(str_buf, "frame%03d", i);
+        nvtxRangePushA(str_buf);
+        if (!context->enqueueV2(bindings.data(), stream, nullptr)) {
+            cerr << "TensorRT enqueueV2 failed!" << endl;
+            exit(EXIT_FAILURE);
+        }
+        nvtxRangePop();
+    }
 
-	// Copy the last output to host
-	float* last_h_output = h_outputs.back();
-	void* last_d_output = d_outputs.back();
-	int last_output_size = outputDims.d[0] * outputDims.d[1] * outputDims.d[2] * outputDims.d[3];
-	cudaMemcpyAsync(last_h_output, last_d_output, last_output_size * sizeof(float), cudaMemcpyDeviceToHost, stream);
-	cudaStreamSynchronize(stream);
+    cudaEventRecord(stop, stream);
+    cudaEventSynchronize(stop);
 
-	// Print stats for the last output
-	float min_val = *std::min_element(last_h_output, last_h_output + last_output_size);
-	float max_val = *std::max_element(last_h_output, last_h_output + last_output_size);
-	float avg_val = std::accumulate(last_h_output, last_h_output + last_output_size, 0.0f) / last_output_size;
-	cout << "Last Output Tensor - Min: " << min_val << ", Max: " << max_val << ", Avg: " << avg_val << endl;
+    float milliseconds = 0;
+    cudaEventElapsedTime(&milliseconds, start, stop);
 
-	// Calculate average latency
-	float average_latency = std::accumulate(latencies.begin(), latencies.end(), 0.0f) / num_trials;
-	cout << "TRT - Average Latency over " << num_trials << " trials: " << average_latency << " ms" << endl;
+    latencies.push_back(milliseconds);
 
-	// Clean up events
-	cudaEventDestroy(start);
-	cudaEventDestroy(stop);
+    ///////////////////////////////////////////
+    ///////////// POST PROCESSING /////////////
+    ///////////////////////////////////////////
 
-	// Convert the last output into a Torch tensor for easy post-processing
-	int batch = outputDims.d[0];
-	int num_classes = outputDims.d[1];
-	int height = outputDims.d[2];
-	int width = outputDims.d[3];
-	auto last_output_tensor = torch::from_blob(last_h_output, { batch, num_classes, height, width }, torch::kFloat32);
+    // Copy last output tensor back to host after all trials
+    float* last_h_output = h_outputs.back();
+    void* last_d_output = d_outputs.back();
+    int last_output_size = outputDims.d[0] * outputDims.d[1] * outputDims.d[2] * outputDims.d[3];
+    // cudaMemcpy(last_h_output, last_d_output, last_output_size * sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpyAsync(last_h_output, last_d_output, last_output_size * sizeof(float), cudaMemcpyDeviceToHost, stream);
+    cudaStreamSynchronize(stream);
 
-	// Debug shape printout
-	std::cout << "\nNumber of dimensions(last_output_tensor): " << last_output_tensor.dim() << std::endl;
-	for (int i = 0; i < last_output_tensor.dim(); ++i) {
-		std::cout << last_output_tensor.size(i) << " ";
-	}
-	std::cout << std::endl;
+    // Calculate stats for the last tensor
+    float min_val = *min_element(last_h_output, last_h_output + last_output_size);
+    float max_val = *max_element(last_h_output, last_h_output + last_output_size);
+    float avg_val = accumulate(last_h_output, last_h_output + last_output_size, 0.0f) / last_output_size;
+    cout << "Last Output Tensor - Min: " << min_val << ", Max: " << max_val << ", Avg: " << avg_val << endl;
 
-	// Find the class index with the highest value (argmax)
-	auto max_out = torch::max(last_output_tensor, 1);
-	auto class_labels = std::get<1>(max_out);
+    float average_latency = accumulate(latencies.begin(), latencies.end(), 0.0f) / num_trials;
+    cout << "TRT - Average Latency over " << num_trials << " trials: " << average_latency << " ms" << endl;
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
 
-	// Scale for visualization
-	int scale = 255 / 21;
-	auto scale_tensor = torch::tensor(scale, class_labels.options());
-	auto image_post = class_labels * scale;
+    int batch = outputDims.d[0]; // Assuming the batch dimension is at index 0
+    int num_classes = outputDims.d[1]; // Assuming the channel dimension (classes) is at index 1
+    int height = outputDims.d[2];
+    int width = outputDims.d[3];
 
-	// Convert each item in the batch to an OpenCV grayscale Mat
-	for (int i = 0; i < batch; ++i) {
-		// Extract i-th image, convert to 8-bit
-		auto single_image_post = image_post[i].squeeze().to(torch::kU8);
-		cv::Mat cv_img(single_image_post.size(0), single_image_post.size(1), CV_8UC1, single_image_post.data_ptr<uchar>());
+    auto last_output_tensor = torch::from_blob(last_h_output, { batch, num_classes, height, width }, torch::kFloat32);
 
-		// Store the grayscale image
-		grayscale_images.push_back(cv_img.clone());
-		try {
-			// Example of saving each image to disk
-			cv::imwrite("pngOutput/trt_seg_output_scaled_" + std::to_string(i) + ".png", cv_img);
-			cout << "Saved IMG: trt_seg_output_scaled_" + std::to_string(i) << endl;
-		}
-		catch (const cv::Exception& ex) {
-			cerr << "Failed to save image trt_seg_output_scaled_" + std::to_string(i) + " because ERROR:" << ex.what() << endl;
-		}
-	}
+    // Debug: Print shape and content of the last output tensor
+    std::cout << "\nNumber of dimensions(last_output_tensor): " << last_output_tensor.dim() << std::endl;
+    for (int i = 0; i < last_output_tensor.dim(); ++i) {
+        std::cout << last_output_tensor.size(i) << " ";
+    }
+    std::cout << std::endl;
 
-	// Cleanup
-	cudaFreeHost(h_input);
-	for (float* h_output : h_outputs) {
-		delete[] h_output;
-	}
-	cudaFree(d_input);
-	for (void* d_output : d_outputs) {
-		cudaFree(d_output);
-	}
-	context->destroy();
-	engine->destroy();
-	runtime->destroy();
-	cudaStreamDestroy(stream);
+    // max returns -> {max values}, {max indices}
+    auto max_out = torch::max(last_output_tensor, 1);
+    auto class_labels = std::get<1>(max_out);
 
-	// Return the grayscale segmentation maps
-	return grayscale_images;
+    int scale = 255 / 21;
+    auto scale_tensor = torch::tensor(scale, class_labels.options());
+    auto image_post = class_labels * scale;
+
+    // convert to HW format, and save each img to vector
+    for (int i = 0; i < batch; ++i) {
+        auto single_image_post = image_post[i].squeeze().to(torch::kU8);  // extract a single img, and convert to 8-bit
+        cv::Mat cv_img(single_image_post.size(0), single_image_post.size(1), CV_8UC1, single_image_post.data_ptr<uchar>());
+
+        // add each gray-scale img to grayscale_images vector and save
+        grayscale_images.push_back(cv_img.clone());  // use clone() to copy
+        try {
+            ///////////////////////////////////////////////////////////////////////////////////////////////
+            cv::imwrite("pngOutput/trt_seg_output_scaled_" + std::to_string(i) + ".png", cv_img);         // move seg images to pngOutput directory
+            //////////////////////////////////////////////////////////////////////////////////////////////
+            
+            cout << "Saved IMG: trt_seg_output_scaled_" + std::to_string(i) << endl;
+        }
+        catch (const cv::Exception& ex) {
+            cerr << "Failed to save image trt_seg_output_scaled_" + std::to_string(i) + " because ERROR:" << ex.what() << endl;
+        }
+    }
+
+    // cleanup
+    cudaFreeHost(h_input);
+    for (float* h_output : h_outputs) {
+        delete[] h_output;
+    }
+    cudaFree(d_input);
+    for (void* d_output : d_outputs) {
+        cudaFree(d_output);
+    }
+    context->destroy();
+    engine->destroy();
+    runtime->destroy();
+    cudaStreamDestroy(stream);
+
+    return grayscale_images;  // return
+}
+
+std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_mul_OPT(const std::string& trt_plan, torch::Tensor img_tensor_batch, int num_trials)
+{
+    std::vector<cv::Mat> grayscale_images;  // for saving each grayscale image
+
+    std::cout << "STARTING measure_segmentation_trt_performance_mul" << std::endl;
+    TRTGeneration::CustomLogger myLogger;
+    IRuntime* runtime = createInferRuntime(myLogger);
+
+    // Read the TensorRT engine plan file (binary mode)
+    std::ifstream planFile(trt_plan, std::ios::binary);
+    std::vector<char> plan((std::istreambuf_iterator<char>(planFile)),
+        std::istreambuf_iterator<char>());
+
+    // Deserialize the engine and create an execution context
+    ICudaEngine* engine = runtime->deserializeCudaEngine(plan.data(), plan.size());
+    IExecutionContext* context = engine->createExecutionContext();
+    if (!engine || !context) {
+        std::cerr << "Failed to deserialize engine or create execution context." << std::endl;
+        exit(EXIT_FAILURE);
+    }
+
+    // ***********************************************************************
+    // MODIFICATIONS: Input tensor is now expected to be a GPU tensor.
+    // ***********************************************************************
+
+    // Check that the input tensor is on CUDA.
+    TORCH_CHECK(img_tensor_batch.device().is_cuda(), "Input tensor must be on CUDA");
+
+    // Calculate the total number of elements in the input tensor.
+    int input_size = img_tensor_batch.numel();
+
+    // Create a CUDA stream.
+    cudaStream_t stream;
+    cudaStreamCreate(&stream);
+
+    // Allocate device memory for the input tensor.
+    void* d_input;
+    cudaError_t status = cudaMalloc(&d_input, input_size * sizeof(float));
+    if (status != cudaSuccess) {
+        std::cerr << "Failed to allocate device memory for input." << std::endl;
+        exit(EXIT_FAILURE);
+    }
+
+    // Instead of copying from host memory, perform a device-to-device copy:
+    // Copy directly from the GPU tensor's data pointer to the allocated GPU memory.
+    cudaError_t copyErr = cudaMemcpyAsync(
+        d_input,
+        img_tensor_batch.data_ptr<float>(),  // already on the GPU
+        input_size * sizeof(float),
+        cudaMemcpyDeviceToDevice,  // device-to-device copy
+        stream);
+    if (copyErr != cudaSuccess) {
+        std::cerr << "CUDA error (device-to-device cudaMemcpyAsync): "
+            << cudaGetErrorString(copyErr) << std::endl;
+        exit(EXIT_FAILURE);
+    }
+
+    // Create the bindings vector and add the GPU input pointer.
+    std::vector<void*> bindings;
+    bindings.push_back(d_input);
+
+    // Set up output bindings as before.
+    int numBindings = engine->getNbBindings();
+    nvinfer1::Dims4 inputDims;
+    nvinfer1::Dims outputDims;
+    std::vector<int> outputBindingIndices;
+    std::vector<std::string> outputTensorNames;
+
+    // Assume binding 0 is input; output bindings start at index 1.
+    for (int i = 1; i < numBindings; ++i) {
+        outputBindingIndices.push_back(i);
+        std::string outputTensorName = engine->getBindingName(i);
+        outputTensorNames.push_back(outputTensorName);
+    }
+
+    // Extract dimensions from the input tensor (assuming 4D: NCHW)
+    inputDims.d[0] = img_tensor_batch.size(0);
+    inputDims.d[1] = img_tensor_batch.size(1);
+    inputDims.d[2] = img_tensor_batch.size(2);
+    inputDims.d[3] = img_tensor_batch.size(3);
+    context->setBindingDimensions(0, inputDims);
+
+    // Allocate memory for outputs.
+    std::vector<void*> d_outputs;
+    std::vector<float*> h_outputs;
+    for (int i : outputBindingIndices) {
+        outputDims = engine->getBindingDimensions(i);
+        // Fix dynamic dimensions if necessary.
+        for (int j = 0; j < outputDims.nbDims; ++j) {
+            if (outputDims.d[j] < 0) {
+                outputDims.d[j] = inputDims.d[j];
+            }
+        }
+
+        int outputSize = outputDims.d[0] * outputDims.d[1] * outputDims.d[2] * outputDims.d[3];
+        float* h_output = new float[outputSize];  // allocate host memory for output
+        void* d_output;
+        status = cudaMalloc(&d_output, outputSize * sizeof(float));
+        if (status != cudaSuccess) {
+            std::cerr << "Device memory allocation for output failed" << std::endl;
+            exit(EXIT_FAILURE);
+        }
+        h_outputs.push_back(h_output);
+        d_outputs.push_back(d_output);
+        bindings.push_back(d_output);
+    }
+
+    // Warm-up runs
+    for (int i = 0; i < 10; ++i) {
+        context->enqueueV2(bindings.data(), stream, nullptr);
+    }
+
+    // Timing inference using CUDA events
+    std::vector<float> latencies;
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+    cudaEventRecord(start, stream);
+
+    // Run inference trials.
+    for (int i = 0; i < num_trials; ++i) {
+        // Optionally annotate with NVTX if desired.
+        if (!context->enqueueV2(bindings.data(), stream, nullptr)) {
+            std::cerr << "TensorRT enqueueV2 failed!" << std::endl;
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    cudaEventRecord(stop, stream);
+    cudaEventSynchronize(stop);
+
+    float milliseconds = 0;
+    cudaEventElapsedTime(&milliseconds, start, stop);
+    latencies.push_back(milliseconds);
+
+    // ***********************************************************************
+    // The remainder of the function remains the same.
+    // It copies the last output from GPU to host, computes stats,
+    // converts the output to a Torch tensor, performs argmax for segmentation,
+    // converts to OpenCV cv::Mat images, saves them, cleans up memory, and returns.
+    // ***********************************************************************
+
+    // Copy last output tensor back to host after all trials.
+    float* last_h_output = h_outputs.back();
+    void* last_d_output = d_outputs.back();
+    int last_output_size = outputDims.d[0] * outputDims.d[1] * outputDims.d[2] * outputDims.d[3];
+    cudaMemcpyAsync(last_h_output, last_d_output, last_output_size * sizeof(float), cudaMemcpyDeviceToHost, stream);
+    cudaStreamSynchronize(stream);
+
+    // Calculate statistics on the last output.
+    float min_val = *std::min_element(last_h_output, last_h_output + last_output_size);
+    float max_val = *std::max_element(last_h_output, last_h_output + last_output_size);
+    float avg_val = std::accumulate(last_h_output, last_h_output + last_output_size, 0.0f) / last_output_size;
+    std::cout << "Last Output Tensor - Min: " << min_val << ", Max: " << max_val
+        << ", Avg: " << avg_val << std::endl;
+
+    float average_latency = std::accumulate(latencies.begin(), latencies.end(), 0.0f) / num_trials;
+    std::cout << "TRT - Average Latency over " << num_trials << " trials: "
+        << average_latency << " ms" << std::endl;
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
+
+    int batch = outputDims.d[0];       // batch dimension
+    int num_classes = outputDims.d[1];   // class channels
+    int height = outputDims.d[2];
+    int width = outputDims.d[3];
+
+    auto last_output_tensor = torch::from_blob(
+        last_h_output, { batch, num_classes, height, width }, torch::kFloat32);
+
+    // Process the output tensor to get segmentation masks.
+    auto max_out = torch::max(last_output_tensor, 1);
+    auto class_labels = std::get<1>(max_out);
+    int scale = 255 / 21;
+    auto image_post = class_labels * scale;
+
+    // Convert each segmentation mask to cv::Mat and save.
+    for (int i = 0; i < batch; ++i) {
+        auto single_image_post = image_post[i].squeeze().to(torch::kU8);
+        cv::Mat cv_img(single_image_post.size(0), single_image_post.size(1), CV_8UC1,
+            single_image_post.data_ptr<uchar>());
+        grayscale_images.push_back(cv_img.clone());
+        try {
+            cv::imwrite("pngOutput/trt_seg_output_scaled_" + std::to_string(i) + ".png", cv_img);
+            std::cout << "Saved IMG: trt_seg_output_scaled_" + std::to_string(i) << std::endl;
+        }
+        catch (const cv::Exception& ex) {
+            std::cerr << "Failed to save image trt_seg_output_scaled_" + std::to_string(i)
+                << " because ERROR:" << ex.what() << std::endl;
+        }
+    }
+
+    // Cleanup: free allocated host and device memory, destroy context, engine, runtime, and stream.
+    cudaFree(d_input);
+    for (float* h_output : h_outputs) {
+        delete[] h_output;
+    }
+    for (void* d_output : d_outputs) {
+        cudaFree(d_output);
+    }
+    context->destroy();
+    engine->destroy();
+    runtime->destroy();
+    cudaStreamDestroy(stream);
+
+    return grayscale_images;
 }
 
 
 
-/**
- * @brief Perform TensorRT inference for super-resolution and measure performance.
- *
- * This function:
- * 1. Deserializes a TensorRT plan file for super-resolution.
- * 2. Allocates pinned host memory and device memory for input/output.
- * 3. Runs multiple warm-up inferences.
- * 4. Measures latency for a specified number of trials.
- * 5. Copies the final output back to host, clips values to [0,1], multiplies by 255, and converts to 8-bit.
- * 6. Optionally compares the output to a provided original image if compare_img_bool is true.
- *
- * @param[in] trt_plan           Path to the TensorRT plan file (super-resolution model).
- * @param[in] original_image_path Path to the original image file (for comparison).
- * @param[in] img_tensor         A 4D input tensor (NCHW) for the super-resolution model.
- * @param[in] num_trials         Number of inference runs for latency measurement.
- * @param[in] compare_img_bool   If true, compare the final output with the original image (e.g., using PSNR/SSIM).
- */
-void TRTInference::measure_trt_performance(const string& trt_plan,
-	const string& original_image_path,
-	torch::Tensor img_tensor,
-	int num_trials,
-	bool compare_img_bool) {
 
-	std::cout << "STARTING measure_trt_performance" << std::endl;
 
-	// Create TRT runtime using custom logger
-	TRTGeneration::CustomLogger myLogger;
-	IRuntime* runtime = createInferRuntime(myLogger);
 
-	// Read plan file in binary
-	ifstream planFile(trt_plan, ios::binary);
-	vector<char> plan((istreambuf_iterator<char>(planFile)), istreambuf_iterator<char>());
+// Super Resolution Inference
+void TRTInference::measure_trt_performance(const string& trt_plan, const string& original_image_path, torch::Tensor img_tensor, int num_trials, bool compare_img_bool) {
 
-	// Deserialize CUDA engine and create context
-	ICudaEngine* engine = runtime->deserializeCudaEngine(plan.data(), plan.size());
-	IExecutionContext* context = engine->createExecutionContext();
-	if (!engine || !context) {
-		cerr << "Failed to deserialize engine or create execution context." << endl;
-		exit(EXIT_FAILURE);
-	}
+    std::cout << "STARTING measure_trt_performance" << std::endl;
+    TRTGeneration::CustomLogger myLogger; 
+    IRuntime* runtime = createInferRuntime(myLogger);
 
-	// Allocate pinned host memory for the input
-	float* h_input;
-	int input_size = img_tensor.numel();
-	cudaMallocHost((void**)&h_input, input_size * sizeof(float)); // pinned memory
+    // reads file in binary w/o preprocessing
+    ifstream planFile(trt_plan, ios::binary);
+    vector<char> plan((istreambuf_iterator<char>(planFile)), istreambuf_iterator<char>());
+    
+    ICudaEngine* engine = runtime->deserializeCudaEngine(plan.data(), plan.size());
+    IExecutionContext* context = engine->createExecutionContext();
+    if (!engine || !context) {
+        cerr << "Failed to deserialize engine or create execution context." << endl;
+        exit(EXIT_FAILURE);
+    }
 
-	int numBindings = engine->getNbBindings();
-	nvinfer1::Dims4 inputDims;
-	nvinfer1::Dims outputDims;
+    float* h_input;
+    int input_size = img_tensor.numel();  // Get total number of elements in the tensor
+    cudaMallocHost((void**)&h_input, input_size * sizeof(float)); // Pinned memory
 
-	// Collect output bindings
-	std::vector<int> outputBindingIndices;
-	std::vector<std::string> outputTensorNames;
-	for (int i = 1; i < numBindings; ++i) {
-		outputBindingIndices.push_back(i);
-		std::string outputTensorName = engine->getBindingName(i);
-		outputTensorNames.push_back(outputTensorName);
-	}
+    int numBindings = engine->getNbBindings();
+    nvinfer1::Dims4 inputDims;
+    nvinfer1::Dims outputDims;
+    
+    std::vector<int> outputBindingIndices;
+    std::vector<std::string> outputTensorNames;
 
-	// Set the dimensions based on the input tensor's shape (NCHW)
-	inputDims.d[0] = img_tensor.size(0);
-	inputDims.d[1] = img_tensor.size(1);
-	inputDims.d[2] = img_tensor.size(2);
-	inputDims.d[3] = img_tensor.size(3);
-	context->setBindingDimensions(0, inputDims);
+    for (int i = 1; i < numBindings; ++i) {
+        outputBindingIndices.push_back(i);
+        std::string outputTensorName = engine->getBindingName(i);
+        outputTensorNames.push_back(outputTensorName);
+    }
 
-	// Vectors to store device pointers for outputs
-	std::vector<void*> d_outputs;
-	std::vector<float*> h_outputs;
-	std::vector<void*> bindings;
+    // Extract the dimensions from img_tensor, assuming the input tensor format is 4D: NCHW
+    inputDims.d[0] = img_tensor.size(0);
+    inputDims.d[1] = img_tensor.size(1);
+    inputDims.d[2] = img_tensor.size(2);
+    inputDims.d[3] = img_tensor.size(3);
+    context->setBindingDimensions(0, inputDims);  // setting dimensions for binding 0, input tensor
 
-	// Create a CUDA stream
-	cudaStream_t stream;
-	cudaStreamCreate(&stream);
+    std::vector<void*> d_outputs;
+    std::vector<float*> h_outputs;
+    std::vector<void*> bindings;
 
-	// Allocate device memory for input
-	void* d_input;
-	cudaMalloc(&d_input, input_size * sizeof(float));
+    // Create CUDA stream
+    cudaStream_t stream;
+    cudaStreamCreate(&stream);
 
-	// Copy data from the torch tensor to pinned memory
-	std::memcpy(h_input, img_tensor.data_ptr<float>(), input_size * sizeof(float));
+    // Allocate device memory for input and add to bindings
+    void* d_input;
+    cudaMalloc(&d_input, input_size * sizeof(float));
+    // cudaMemcpy(d_input, h_input, input_size * sizeof(float), cudaMemcpyHostToDevice);
 
-	// Async copy from host to device
-	cudaError_t mallocErr = cudaMemcpyAsync(d_input, h_input, input_size * sizeof(float), cudaMemcpyHostToDevice, stream);
-	if (mallocErr != cudaSuccess) {
-		cerr << "CUDA error (cudaMemcpyAsync): " << cudaGetErrorString(mallocErr) << endl;
-		exit(EXIT_FAILURE);
-	}
-	bindings.push_back(d_input);
+    // Copy data from img_tensor to h_input
+    std::memcpy(h_input, img_tensor.data_ptr<float>(), input_size * sizeof(float));
 
-	// Handle outputs (assumes we are upscaling image dimensions for SR)
-	for (int i : outputBindingIndices) {
-		outputDims = engine->getBindingDimensions(i);
+    // Transfer input data to GPU with error check
+    cudaError_t mallocErr = cudaMemcpyAsync(d_input, h_input, input_size * sizeof(float), cudaMemcpyHostToDevice, stream);
+    if (mallocErr != cudaSuccess) {
+        cerr << "CUDA error (cudaMemcpyAsync): " << cudaGetErrorString(mallocErr) << endl;
+        exit(EXIT_FAILURE);
+    }
+    bindings.push_back(d_input);
 
-		// If we had dynamic shape support, fill it in from input
-		for (int j = 0; j < outputDims.nbDims; ++j) {
-			if (outputDims.d[j] < 0) {
-				outputDims.d[j] = inputDims.d[j];
-			}
-		}
+    // Handle dynamic dimensions
+    for (int i : outputBindingIndices) {
+        outputDims = engine->getBindingDimensions(i);
 
-		// IMPORTANT: Manually modify the output dimensions if your SR model expects it.
-		// This example scales outputDims height by 2 and width by 4 (arbitrary for demonstration).
-		outputDims.d[2] *= 2;
-		outputDims.d[3] *= 4;
+        for (int j = 0; j < outputDims.nbDims; ++j) {
+            if (outputDims.d[j] < 0) {
+                outputDims.d[j] = inputDims.d[j];
+            }
+        }
 
-		int outputSize = outputDims.d[0] * outputDims.d[1] * outputDims.d[2] * outputDims.d[3];
-		float* h_output = new float[outputSize];
-		void* d_output;
-		cudaError_t status = cudaMalloc(&d_output, outputSize * sizeof(float));
-		if (status != cudaSuccess) {
-			cerr << "Device memory allocation failed" << endl;
-			exit(EXIT_FAILURE);
-		}
+        // PLEASE CHANGE ACCORDING TO THE MODEL USED: Currently setting output dims to 4x as SR models output 4x the og image
+        outputDims.d[2] *= 2;
+        outputDims.d[3] *= 4;
 
-		h_outputs.push_back(h_output);
-		d_outputs.push_back(d_output);
-		bindings.push_back(d_output);
-	}
+        int outputSize = outputDims.d[0] * outputDims.d[1] * outputDims.d[2] * outputDims.d[3];
+        float* h_output = new float[outputSize];
+        void* d_output;
 
-	// Prepare to measure performance
-	vector<float> latencies;
-	cudaEvent_t start, stop;
-	cudaEventCreate(&start);
-	cudaEventCreate(&stop);
+        cudaError_t status = cudaMalloc(&d_output, outputSize * sizeof(float));
+        if (status != cudaSuccess) {
+            cerr << "Device memory allocation failed" << endl;
+            exit(EXIT_FAILURE);
+        }
 
-	// Warm up
-	for (int i = 0; i < 10; ++i) {
-		context->enqueueV2(bindings.data(), stream, nullptr);
-	}
+        h_outputs.push_back(h_output);
+        d_outputs.push_back(d_output);
+        bindings.push_back(d_output);
+    }
 
-	// Record time for multiple trials
-	cudaEventRecord(start, stream);
-	for (int i = 0; i < num_trials; ++i) {
-		if (!context->enqueueV2(bindings.data(), stream, nullptr)) {
-			cerr << "TensorRT enqueueV2 failed!" << endl;
-			exit(EXIT_FAILURE);
-		}
-	}
-	cudaEventRecord(stop, stream);
-	cudaEventSynchronize(stop);
+    vector<float> latencies;
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
 
-	float milliseconds = 0;
-	cudaEventElapsedTime(&milliseconds, start, stop);
-	latencies.push_back(milliseconds);
+    // warm up
+    for (int i = 0; i < 10; ++i) {
+        context->enqueueV2(bindings.data(), stream, nullptr);
+    }
 
-	// Copy the last output back to host
-	float* last_h_output = h_outputs.back();
-	void* last_d_output = d_outputs.back();
-	int last_output_size = outputDims.d[0] * outputDims.d[1] * outputDims.d[2] * outputDims.d[3];
-	cudaMemcpyAsync(last_h_output, last_d_output, last_output_size * sizeof(float), cudaMemcpyDeviceToHost, stream);
-	cudaStreamSynchronize(stream);
+    cudaEventRecord(start, stream);
 
-	// Calculate min, max, avg for debugging
-	float min_val = *std::min_element(last_h_output, last_h_output + last_output_size);
-	float max_val = *std::max_element(last_h_output, last_h_output + last_output_size);
-	float avg_val = std::accumulate(last_h_output, last_h_output + last_output_size, 0.0f) / last_output_size;
-	cout << "Last Output Tensor - Min: " << min_val << ", Max: " << max_val << ", Avg: " << avg_val << endl;
+    for (int i = 0; i < num_trials; ++i) {
+        // Run asynchronous inference using enqueueV2
+        if (!context->enqueueV2(bindings.data(), stream, nullptr)) {
+            cerr << "TensorRT enqueueV2 failed!" << endl;
+            exit(EXIT_FAILURE);
+        }
+    }
+    cudaEventRecord(stop, stream);
+    cudaEventSynchronize(stop);
 
-	// Average latency
-	float average_latency = std::accumulate(latencies.begin(), latencies.end(), 0.0f) / num_trials;
-	cout << "TRT - Average Latency over " << num_trials << " trials: " << average_latency << " ms" << endl;
-	cudaEventDestroy(start);
-	cudaEventDestroy(stop);
+    float milliseconds = 0;
+    cudaEventElapsedTime(&milliseconds, start, stop);
 
-	// Convert the final float output into a single-channel CV_32F Mat
-	cv::Mat image_data(outputDims.d[2], outputDims.d[3], CV_32F, last_h_output);
+    latencies.push_back(milliseconds);
 
-	// Clip to [0, 1] for typical image normalization
-	cv::Mat clipped_image_data;
-	cv::min(image_data, 1.0, clipped_image_data);
-	cv::max(clipped_image_data, 0.0, clipped_image_data);
+    // Copy last output tensor back to host after all trials
+    float* last_h_output = h_outputs.back();
+    void* last_d_output = d_outputs.back();
+    int last_output_size = outputDims.d[0] * outputDims.d[1] * outputDims.d[2] * outputDims.d[3];
+    // cudaMemcpy(last_h_output, last_d_output, last_output_size * sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpyAsync(last_h_output, last_d_output, last_output_size * sizeof(float), cudaMemcpyDeviceToHost, stream);
+    cudaStreamSynchronize(stream);
 
-	// Multiply by 255 for 8-bit display
-	clipped_image_data *= 255;
-	clipped_image_data.convertTo(clipped_image_data, CV_8U);
+    // Calculate stats for the last tensor
+    float min_val = *min_element(last_h_output, last_h_output + last_output_size);
+    float max_val = *max_element(last_h_output, last_h_output + last_output_size);
+    float avg_val = accumulate(last_h_output, last_h_output + last_output_size, 0.0f) / last_output_size;
+    cout << "Last Output Tensor - Min: " << min_val << ", Max: " << max_val << ", Avg: " << avg_val << endl;
 
-	// Save the final output
-	try {
-		cv::imwrite("pngOutput/trt_output.png", clipped_image_data); // custom path
-		cout << "Saved IMG: trt_output" << endl;
+    float average_latency = accumulate(latencies.begin(), latencies.end(), 0.0f) / num_trials;
+    cout << "TRT - Average Latency over " << num_trials << " trials: " << average_latency << " ms" << endl;
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
 
-		// Optionally compare with original
-		cv::Mat original_image = cv::imread(original_image_path);
-		if (original_image.empty()) {
-			cerr << "Error: Original image not found or unable to read." << endl;
-		}
-		else if (compare_img_bool) {
-			// If compare_img_bool is true, run user-defined comparison (e.g., PSNR, SSIM, etc.)
-			ImageProcessingUtil::compareImages(clipped_image_data, original_image);
-		}
+    // Saving the last output tensor as an image
+    cv::Mat image_data(outputDims.d[2], outputDims.d[3], CV_32F, last_h_output);
 
-	}
-	catch (const cv::Exception& ex) {
-		cerr << "Failed to save the image: " << ex.what() << endl;
-	}
+    // Clip the values between 0 and 1
+    cv::Mat clipped_image_data;
+    cv::min(image_data, 1.0, clipped_image_data);
+    cv::max(clipped_image_data, 0.0, clipped_image_data);
 
-	// Cleanup
-	cudaFreeHost(h_input);
-	for (float* h_output : h_outputs) {
-		delete[] h_output;
-	}
-	cudaFree(d_input);
-	for (void* d_output : d_outputs) {
-		cudaFree(d_output);
-	}
-	context->destroy();
-	engine->destroy();
-	runtime->destroy();
-	cudaStreamDestroy(stream);
+    // Multiply by 255
+    clipped_image_data *= 255;
+
+    // Convert to 8-bit image
+    clipped_image_data.convertTo(clipped_image_data, CV_8U);
+
+
+    try {
+        cv::imwrite("pngOutput/trt_output.png", clipped_image_data); // custom path
+        cout << "Saved IMG: trt_output" << endl;
+        
+        cv::Mat original_image = cv::imread(original_image_path);
+        if (original_image.empty()) {
+            cerr << "Error: Original image not found or unable to read." << endl;
+            return;
+        }
+
+        cv::Mat grayscale_original;
+        cv::cvtColor(original_image, grayscale_original, cv::COLOR_BGR2GRAY);
+
+        if (compare_img_bool == true){
+            ImageProcessingUtil::compareImages(clipped_image_data, grayscale_original);
+        }
+
+    } catch (const cv::Exception& ex) {
+        cerr << "Failed to save the image: " << ex.what() << endl;
+    }
+
+    // Clean up
+    cudaFreeHost(h_input);
+    for (float* h_output : h_outputs) {
+        delete[] h_output;
+    }
+    cudaFree(d_input);
+    for (void* d_output : d_outputs) {
+        cudaFree(d_output);
+    }
+    context->destroy();
+    engine->destroy();
+    runtime->destroy();
+    cudaStreamDestroy(stream); 
 }

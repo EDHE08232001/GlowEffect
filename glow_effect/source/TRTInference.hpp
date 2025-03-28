@@ -39,6 +39,8 @@ public:
    
     // Modified measure_segmentation_trt_performance_mul to return a vector of grayscale images
     static std::vector<cv::Mat> measure_segmentation_trt_performance_mul(const std::string& trt_plan, torch::Tensor img_tensor, int num_trials);
+
+    static std::vector<cv::Mat> measure_segmentation_trt_performance_mul_OPT(const std::string& trt_plan, torch::Tensor img_tensor, int num_trials);
 };
 
 #endif

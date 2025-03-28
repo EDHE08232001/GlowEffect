@@ -1,0 +1,10 @@
+D:\csi4900\glow_mipmap\glow_effect\x64\Release\glow_effect.vcxproj.CopyComplete
+D:\csi4900\glow_mipmap\glow_effect\x64\Release\glow_effect.exe
+D:\csi4900\glow_mipmap\glow_effect\x64\Release\wxbase32u_vc_x64_custom.dll
+D:\csi4900\glow_mipmap\glow_effect\x64\Release\zlib1.dll
+D:\csi4900\glow_mipmap\glow_effect\x64\Release\pcre2-16.dll
+D:\csi4900\glow_mipmap\glow_effect\x64\Release\wxmsw32u_core_vc_x64_custom.dll
+D:\csi4900\glow_mipmap\glow_effect\x64\Release\jpeg62.dll
+D:\csi4900\glow_mipmap\glow_effect\x64\Release\libpng16.dll
+D:\csi4900\glow_mipmap\glow_effect\x64\Release\tiff.dll
+D:\csi4900\glow_mipmap\glow_effect\x64\Release\liblzma.dll
