@@ -17,7 +17,7 @@
 #include "helper_math.h"
 #include "device_launch_parameters.h"
 
-#include "all_common.h"
+#include "glow_effect/all_common.h"
 
 
  //

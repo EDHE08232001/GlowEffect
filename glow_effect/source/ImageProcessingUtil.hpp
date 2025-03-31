@@ -57,10 +57,6 @@ public:
 	 */
 	static torch::Tensor process_img(const std::string& img_path, bool grayscale = false);
 
-// <<<<<<< HEAD
-
-    static torch::Tensor process_img_batch(const vector<string>& img_paths, bool grayscale = false);
-// =======
 	/**
 	 * @brief Processes an image from a GPU Mat and returns it as a Torch tensor.
 	 *

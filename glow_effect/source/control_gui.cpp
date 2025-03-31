@@ -13,7 +13,7 @@
  * 2025/JAN/17      Edward He       Updated GUI
  ********************************************************************************************************************/
 
-#include "all_common.h"
+#include "glow_effect/all_common.h"
 #include "opencv2/opencv.hpp"
 #include "glow_effect.hpp"
 #include "./wx_gui.h"

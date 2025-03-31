@@ -31,7 +31,7 @@
 #include <cuda_runtime.h>
 #include "glow_effect.hpp"
 #include "old_movies.cuh"
-#include "all_common.h"
+#include "glow_effect/all_common.h"
 #include <torch/torch.h>
 #include <vector>
 #include "imageprocessingutil.hpp"
@@ -51,8 +51,8 @@
 #include "resizeWithTexture.h"
 // #include <glow_effect/source_cu/mipmap.cu>
 
- // Global Variable Array: button_State
-bool button_State[5] = { false, false, false, false, false };
+// // Global Variable Array: button_State
+//bool button_State[5] = { false, false, false, false, false };
 
 
 #define FILTER_MORPH 1
@@ -202,7 +202,7 @@ void glow_blow(const cv::Mat& mask, cv::Mat& dst_rgba, int param_KeyLevel, int D
 	dst_rgba = cv::Mat::zeros(mask.size(), CV_8UC4);
 
 	// Use a more vibrant color for better visibility
-	cv::Vec4b overlay_color = { 128, 0, 128, 255 };
+	cv::Vec4b overlay_color = { 147, 20, 226, 255 };
 
 	// Variables to track target region information
 	bool has_target_region = false;
@@ -1331,11 +1331,10 @@ cleanup:
 }
 
 /**
- * @brief Applies a glow effect to video processing only the exact specified pixel value
+ * @brief Applies a glow effect to video using parallel processing of single-batch TRT model
  *
- * This modified function focuses on detecting a single, specific segmentation value
- * without using a broad delta range. The precise segmentation value is set at the
- * beginning of the function.
+ * This function processes video frames in parallel using multiple streams and the
+ * single-batch TensorRT model. Fixed version addresses glow effect visibility issues.
  *
  * @param video_nm Path to the input video file
  * @param planFilePath Path to the single-batch TensorRT plan file

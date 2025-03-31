@@ -160,59 +160,6 @@ torch::Tensor ImageProcessingUtil::process_img(const std::string& img_path, bool
 	}
 }
 
-/**
- * @brief Processes an image from a GPU Mat and converts it into a Torch tensor.
- *
- * If @p grayscale is true, the image is converted to grayscale and returned with shape [1, H, W];
- * otherwise, the image is processed in color (converted from BGR to RGB, normalized) and returned with shape [1, 3, H, W].
- *
- * @param process_img The input cv::cuda::GpuMat image.
- * @param grayscale Whether to convert the image to grayscale.
- * @return A Torch tensor representing the processed image.
- */
-torch::Tensor ImageProcessingUtil::process_img(const cv::cuda::GpuMat& process_img, bool grayscale) {
-	cv::cuda::GpuMat gpu_img;
-	if (grayscale) {
-		cv::cuda::cvtColor(process_img, gpu_img, cv::COLOR_BGR2GRAY);
-		gpu_img.convertTo(gpu_img, CV_32FC1, 1.0f / 255.0f);
-
-		cv::Mat cpu_img;
-		gpu_img.download(cpu_img);
-
-		auto img_tensor = torch::from_blob(cpu_img.data, { cpu_img.rows, cpu_img.cols, 1 }, torch::kFloat32).clone();
-		img_tensor = img_tensor.unsqueeze(0); // Add batch dimension
-		std::cout << "Processed BW tensor.shape: " << img_tensor.sizes() << std::endl;
-		return img_tensor;
-	}
-	else {
-		gpu_img = process_img.clone();
-		gpu_img.convertTo(gpu_img, CV_32FC3, 1.0f / 255.0f);
-
-		cv::Mat cpu_img;
-		gpu_img.download(cpu_img);
-
-		auto img_tensor = torch::from_blob(cpu_img.data, { cpu_img.rows, cpu_img.cols, 3 }, torch::kFloat32).clone();
-		img_tensor = img_tensor.permute({ 2, 0, 1 }); // [H, W, C] -> [C, H, W]
-		// Convert BGR to RGB:
-		auto rgb_tensor = img_tensor.index_select(0, torch::tensor({ 2, 1, 0 }));
-		auto din = rgb_tensor.unsqueeze(0); // Add batch dimension: [1, 3, H, W]
-
-		// Normalize the tensor
-		auto mean = torch::tensor({ 0.485f, 0.456f, 0.406f }).view({ 1, 3, 1, 1 }).to(din.options());
-		auto std = torch::tensor({ 0.229f, 0.224f, 0.225f }).view({ 1, 3, 1, 1 }).to(din.options());
-		auto din_normalized = (din - mean) / std;
-
-		std::cout << "Processed din_normalized.shape: " << din_normalized.sizes() << std::endl;
-		float min_val = din_normalized.min().item<float>();
-		float max_val = din_normalized.max().item<float>();
-		float avg_val = din_normalized.mean().item<float>();
-		std::cout << "din_normalized IMG Tensor - Min: " << min_val
-			<< ", Max: " << max_val << ", Avg: " << avg_val << std::endl;
-
-		return din_normalized;
-	}
-}
-
 torch::Tensor ImageProcessingUtil::process_img(const cv::cuda::GpuMat& gpu_img, bool grayscale)
 {
     /*cudaPointerAttributes attributes;

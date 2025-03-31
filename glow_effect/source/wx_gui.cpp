@@ -1,4 +1,4 @@
-#include "all_common.h"
+#include "glow_effect/all_common.h"
 #include "./all_main.h"
 #include "./wx_gui.h"
 #include "./glow_effect.hpp"

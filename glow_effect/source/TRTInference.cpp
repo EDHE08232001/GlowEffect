@@ -1173,13 +1173,13 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_single_b
 	// Create the TensorRT runtime and load the engine
 	TRTGeneration::CustomLogger myLogger;
 	IRuntime* runtime = createInferRuntime(myLogger);
-	ifstream planFile(trt_plan, ios::binary);
+	std::ifstream planFile(trt_plan, std::ios::binary);
 	if (!planFile.is_open()) {
 		std::cerr << "Error: Could not open plan file: " << trt_plan << std::endl;
 		return {};
 	}
 
-	vector<char> plan((istreambuf_iterator<char>(planFile)), istreambuf_iterator<char>());
+	std::vector<char> plan((std::istreambuf_iterator<char>(planFile)), std::istreambuf_iterator<char>());
 	std::cout << "Loaded single-batch plan file: " << plan.size() / (1024 * 1024) << " MiB" << std::endl;
 
 	ICudaEngine* engine = runtime->deserializeCudaEngine(plan.data(), plan.size());
@@ -1238,15 +1238,19 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_single_b
 			for (int img_idx = start_idx; img_idx < end_idx; ++img_idx) {
 				const torch::Tensor& img_tensor = img_tensors[img_idx];
 
-				// Verify tensor dimensions
+				// Verify tensor dimensions and that it resides on GPU
 				if (img_tensor.dim() != 4 || img_tensor.size(0) != 1) {
 					std::cerr << "Error: Invalid tensor dimensions for image " << img_idx
 						<< ". Expected 4D tensor with batch size 1." << std::endl;
 					continue;
 				}
+				if (!img_tensor.is_cuda()) {
+					std::cerr << "Error: img_tensor for image " << img_idx << " is not on GPU." << std::endl;
+					continue;
+				}
 
 				try {
-					// === PRE-ALLOCATION OF ALL MEMORY (BEFORE ANY GRAPH CAPTURE) ===
+					// === SET UP INFERENCE INPUT ===
 
 					// Set input dimensions (always batch size 1 for single-batch model)
 					nvinfer1::Dims4 inputDims;
@@ -1261,36 +1265,9 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_single_b
 						continue;
 					}
 
-					// Allocate all input/output memory BEFORE any graph capture
+					// Since the tensor is already on the GPU, we simply use its device pointer directly.
 					size_t input_size = img_tensor.numel();
-					float* h_input = nullptr;
-					void* d_input = nullptr;
-
-					cudaError_t cuda_error = cudaMallocHost((void**)&h_input, input_size * sizeof(float));
-					if (cuda_error != cudaSuccess) {
-						std::cerr << "Error allocating host input memory: " << cudaGetErrorString(cuda_error) << std::endl;
-						continue;
-					}
-
-					cuda_error = cudaMalloc(&d_input, input_size * sizeof(float));
-					if (cuda_error != cudaSuccess) {
-						std::cerr << "Error allocating device input memory: " << cudaGetErrorString(cuda_error) << std::endl;
-						cudaFreeHost(h_input);
-						continue;
-					}
-
-					// Copy input data to host buffer
-					std::memcpy(h_input, img_tensor.data_ptr<float>(), input_size * sizeof(float));
-
-					// Copy to device (outside any graph capture)
-					cuda_error = cudaMemcpyAsync(d_input, h_input, input_size * sizeof(float),
-						cudaMemcpyHostToDevice, inferStream);
-					if (cuda_error != cudaSuccess) {
-						std::cerr << "Error copying input to device: " << cudaGetErrorString(cuda_error) << std::endl;
-						cudaFree(d_input);
-						cudaFreeHost(h_input);
-						continue;
-					}
+					float* d_input = const_cast<float*>(img_tensor.data_ptr<float>());
 
 					// Set up bindings and allocate output memory
 					std::vector<void*> bindings = { d_input };
@@ -1309,15 +1286,14 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_single_b
 						float* h_output = nullptr;
 						void* d_output = nullptr;
 
-						cuda_error = cudaMallocHost((void**)&h_output, outputSize * sizeof(float));
+						cudaError_t cuda_error = cudaMallocHost((void**)&h_output, outputSize * sizeof(float));
 						if (cuda_error != cudaSuccess) {
 							std::cerr << "Error allocating host output memory: " << cudaGetErrorString(cuda_error) << std::endl;
 							for (size_t j = 0; j < h_outputs.size(); j++) {
 								cudaFreeHost(h_outputs[j]);
 								cudaFree(d_outputs[j]);
 							}
-							cudaFree(d_input);
-							cudaFreeHost(h_input);
+							// No need to free d_input since it's managed by the tensor.
 							break;
 						}
 
@@ -1329,8 +1305,6 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_single_b
 								cudaFreeHost(h_outputs[j]);
 								cudaFree(d_outputs[j]);
 							}
-							cudaFree(d_input);
-							cudaFreeHost(h_input);
 							break;
 						}
 
@@ -1352,15 +1326,13 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_single_b
 
 					// Allocate memory for segmentation mask output
 					unsigned char* d_argmax_output = nullptr;
-					cuda_error = cudaMalloc(&d_argmax_output, height * width * sizeof(unsigned char));
+					cudaError_t cuda_error = cudaMalloc(&d_argmax_output, height * width * sizeof(unsigned char));
 					if (cuda_error != cudaSuccess) {
 						std::cerr << "Error allocating argmax output memory: " << cudaGetErrorString(cuda_error) << std::endl;
 						for (size_t j = 0; j < h_outputs.size(); j++) {
 							cudaFreeHost(h_outputs[j]);
 							cudaFree(d_outputs[j]);
 						}
-						cudaFree(d_input);
-						cudaFreeHost(h_input);
 						continue;
 					}
 
@@ -1380,8 +1352,6 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_single_b
 							cudaFreeHost(h_outputs[j]);
 							cudaFree(d_outputs[j]);
 						}
-						cudaFree(d_input);
-						cudaFreeHost(h_input);
 						continue;
 					}
 
@@ -1496,8 +1466,6 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_single_b
 							cudaFreeHost(h_outputs[j]);
 							cudaFree(d_outputs[j]);
 						}
-						cudaFree(d_input);
-						cudaFreeHost(h_input);
 						continue;
 					}
 					cudaStreamSynchronize(postStream);
@@ -1521,13 +1489,11 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_single_b
 					// Update local counters
 					local_frames_processed++;
 
-					// Cleanup per-image resources
+					// Cleanup per-image resources (note: we do not free d_input since it comes from the tensor)
 					delete[] h_argmax_output;
 					cudaFree(d_argmax_output);
 					cudaEventDestroy(start);
 					cudaEventDestroy(stop);
-					cudaFreeHost(h_input);
-					cudaFree(d_input);
 					for (auto ptr : h_outputs) {
 						cudaFreeHost(ptr);
 					}
@@ -1581,19 +1547,15 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_single_b
 	for (int t = 0; t < num_streams; ++t) {
 		std::cout << "Worker " << t << ": " << frames_processed[t] << " frames in "
 			<< processing_times[t] << " seconds";
-
 		if (frames_processed[t] > 0) {
 			double fps = frames_processed[t] / processing_times[t];
 			std::cout << " (" << fps << " fps)";
 		}
-
 		std::cout << (graph_usage[t] ? " [with CUDA Graph]" : " [without CUDA Graph]") << std::endl;
-
 		total_processing_time += processing_times[t];
 		total_processed += frames_processed[t];
 		if (graph_usage[t]) graph_workers++;
 	}
-
 	std::cout << "Average processing time per worker: " << total_processing_time / num_streams << " seconds" << std::endl;
 	std::cout << "Effective overall throughput: " << num_images / (total_processing_time / num_streams) << " fps" << std::endl;
 	std::cout << "Workers using CUDA Graph: " << graph_workers << " of " << num_streams << std::endl;

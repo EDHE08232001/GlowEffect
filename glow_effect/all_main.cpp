@@ -337,7 +337,7 @@ int main() {
 					}
 					else {
 						std::cout << "Using standard implementation..." << std::endl;
-						glow_effect_video(videoPath.c_str(), planFilePath);
+						glow_effect_video_triple_buffer(videoPath.c_str(), planFilePath);
 					}
 				}
 				catch (const std::exception& e) {

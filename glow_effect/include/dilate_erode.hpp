@@ -11,7 +11,7 @@
  *
  ********************************************************************************************************************/
 #pragma once
-#include "all_common.h"
+#include "glow_effect/all_common.h"
 
 template<typename _Ty, int _Sh>
 class dilate_erode_op
