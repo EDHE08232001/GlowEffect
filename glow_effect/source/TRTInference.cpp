@@ -19,6 +19,7 @@
 #include <mutex>
 #include <iterator>
 #include "segmentation_kernels.h"
+#include "TRTInference.hpp"
 
 // <<<<<<< HEAD
 
@@ -26,6 +27,328 @@
 extern int param_KeyLevel;  // Defined in control_gui.cpp
 extern int param_KeyScale;  // Defined in control_gui.cpp 
 extern int default_scale;   // Defined in control_gui.cpp
+
+
+
+IRuntime* TRTInference::s_runtime = nullptr;
+ICudaEngine* TRTInference::s_engine = nullptr;
+IExecutionContext* TRTInference::s_context = nullptr;
+bool TRTInference::s_initialized = false;
+
+cudaGraph_t TRTInference::s_graph = nullptr;
+cudaGraphExec_t TRTInference::s_graphExec = nullptr;
+bool TRTInference::s_graphInitialized = false;
+void* TRTInference::s_d_input = nullptr;
+std::vector<void*> TRTInference::s_d_outputs;
+std::vector<float*> TRTInference::s_h_outputs;
+std::vector<void*> TRTInference::s_bindings;
+cudaStream_t TRTInference::s_stream = nullptr;
+nvinfer1::Dims TRTInference::s_outputDims;
+
+bool TRTInference::initializeTRTEngine(const std::string& trt_plan) {
+	// If already initialized, return success
+	if (s_initialized) {
+		return true;
+	}
+
+	std::cout << "Initializing TensorRT engine from plan: " << trt_plan << std::endl;
+
+	// Create logger and runtime
+	TRTGeneration::CustomLogger myLogger;
+	s_runtime = createInferRuntime(myLogger);
+
+	// Read the TensorRT engine plan file (binary mode)
+	std::ifstream planFile(trt_plan, std::ios::binary);
+	if (!planFile.is_open()) {
+		std::cerr << "Failed to open plan file: " << trt_plan << std::endl;
+		return false;
+	}
+
+	std::vector<char> plan((std::istreambuf_iterator<char>(planFile)),
+		std::istreambuf_iterator<char>());
+
+	// Deserialize the engine
+	s_engine = s_runtime->deserializeCudaEngine(plan.data(), plan.size());
+	if (!s_engine) {
+		std::cerr << "Failed to deserialize engine." << std::endl;
+		return false;
+	}
+
+	// Create execution context
+	s_context = s_engine->createExecutionContext();
+	if (!s_context) {
+		std::cerr << "Failed to create execution context." << std::endl;
+		s_engine->destroy();
+		s_runtime->destroy();
+		return false;
+	}
+
+	// Create a persistent CUDA stream
+	cudaStreamCreate(&s_stream);
+
+	s_initialized = true;
+	std::cout << "TensorRT engine initialized successfully." << std::endl;
+	return true;
+}
+
+bool TRTInference::initializeCudaGraph(const torch::Tensor& sample_tensor) {
+	if (!s_initialized) {
+		std::cerr << "TensorRT engine must be initialized before CUDA graph." << std::endl;
+		return false;
+	}
+
+	if (s_graphInitialized) {
+		return true; // Graph already initialized
+	}
+
+	std::cout << "Initializing CUDA graph for inference..." << std::endl;
+
+	// Calculate input size
+	int input_size = sample_tensor.numel();
+
+	// Allocate persistent device memory for input
+	cudaError_t status = cudaMalloc(&s_d_input, input_size * sizeof(float));
+	if (status != cudaSuccess) {
+		std::cerr << "Failed to allocate persistent device memory for input." << std::endl;
+		return false;
+	}
+
+	// Initialize the bindings vector with input buffer
+	s_bindings.clear();
+	s_bindings.push_back(s_d_input);
+
+	// Set up output bindings
+	int numBindings = s_engine->getNbBindings();
+	std::vector<int> outputBindingIndices;
+	for (int i = 1; i < numBindings; ++i) {
+		outputBindingIndices.push_back(i);
+	}
+
+	// Extract dimensions from the input tensor (assuming shape [1, C, H, W])
+	nvinfer1::Dims4 inputDims;
+	inputDims.d[0] = sample_tensor.size(0);  // should be 1
+	inputDims.d[1] = sample_tensor.size(1);
+	inputDims.d[2] = sample_tensor.size(2);
+	inputDims.d[3] = sample_tensor.size(3);
+	s_context->setBindingDimensions(0, inputDims);
+
+	// Allocate persistent memory for outputs
+	s_d_outputs.clear();
+	s_h_outputs.clear();
+
+	for (int i : outputBindingIndices) {
+		s_outputDims = s_engine->getBindingDimensions(i);
+		// Fix dynamic dimensions if necessary
+		for (int j = 0; j < s_outputDims.nbDims; ++j) {
+			if (s_outputDims.d[j] < 0) {
+				s_outputDims.d[j] = inputDims.d[j];
+			}
+		}
+		int outputSize = s_outputDims.d[0] * s_outputDims.d[1] * s_outputDims.d[2] * s_outputDims.d[3];
+		float* h_output = new float[outputSize];  // allocate host memory for output
+		void* d_output;
+		status = cudaMalloc(&d_output, outputSize * sizeof(float));
+		if (status != cudaSuccess) {
+			std::cerr << "Device memory allocation for output failed" << std::endl;
+			// Clean up already allocated resources
+			cudaFree(s_d_input);
+			for (float* h_output : s_h_outputs) {
+				delete[] h_output;
+			}
+			for (void* d_output : s_d_outputs) {
+				cudaFree(d_output);
+			}
+			return false;
+		}
+		s_h_outputs.push_back(h_output);
+		s_d_outputs.push_back(d_output);
+		s_bindings.push_back(d_output);
+	}
+
+	// --- Warm-Up Round ---
+	// Run one inference call to finish any lazy initialization.
+	if (!s_context->enqueueV2(s_bindings.data(), s_stream, nullptr)) {
+		std::cerr << "Warm-up inference call failed." << std::endl;
+		return false;
+	}
+	cudaStreamSynchronize(s_stream);
+	// --- End Warm-Up Round ---
+
+	// Begin graph capture
+	cudaGraphCreate(&s_graph, 0);
+	cudaStreamBeginCapture(s_stream, cudaStreamCaptureModeGlobal);
+
+	// Copy sample data to GPU (this is a placeholder operation in the graph)
+	cudaMemcpyAsync(
+		s_d_input,
+		sample_tensor.data_ptr<float>(),
+		input_size * sizeof(float),
+		cudaMemcpyDeviceToDevice,
+		s_stream);
+
+	// Execute inference (this will be recorded in the graph)
+	s_context->enqueueV2(s_bindings.data(), s_stream, nullptr);
+
+	// End graph capture
+	cudaStreamEndCapture(s_stream, &s_graph);
+
+	// Create executable graph
+	cudaGraphInstantiate(&s_graphExec, s_graph, nullptr, nullptr, 0);
+
+	s_graphInitialized = true;
+	std::cout << "CUDA graph initialized successfully." << std::endl;
+	return true;
+}
+
+
+std::vector<cv::Mat> TRTInference::performSegmentationInference(torch::Tensor img_tensor, int num_trials) {
+	std::vector<cv::Mat> grayscale_images;
+
+	// Check if engine is initialized
+	if (!s_initialized || !s_engine || !s_context) {
+		std::cerr << "ERROR: Engine not initialized. Call initializeTRTEngine first." << std::endl;
+		return grayscale_images;
+	}
+
+	// Check that the input tensor is on CUDA
+	TORCH_CHECK(img_tensor.device().is_cuda(), "Input tensor must be on CUDA");
+
+	// Initialize CUDA graph if not already done
+	if (!s_graphInitialized) {
+		if (!initializeCudaGraph(img_tensor)) {
+			std::cerr << "Failed to initialize CUDA graph." << std::endl;
+			return grayscale_images;
+		}
+	}
+
+	// Calculate the total number of elements in the input tensor
+	int input_size = img_tensor.numel();
+
+	// Copy input data to the persistent input device memory
+	cudaMemcpyAsync(
+		s_d_input,
+		img_tensor.data_ptr<float>(),
+		input_size * sizeof(float),
+		cudaMemcpyDeviceToDevice,
+		s_stream);
+
+	// Launch the CUDA graph (much faster than regular enqueueV2)
+	cudaGraphLaunch(s_graphExec, s_stream);
+
+	// Synchronize to ensure computation is complete
+	cudaStreamSynchronize(s_stream);
+
+	// Copy the output tensor back to host
+	float* last_h_output = s_h_outputs.back();
+	void* last_d_output = s_d_outputs.back();
+	int last_output_size = s_outputDims.d[0] * s_outputDims.d[1] * s_outputDims.d[2] * s_outputDims.d[3];
+	cudaMemcpyAsync(last_h_output, last_d_output, last_output_size * sizeof(float),
+		cudaMemcpyDeviceToHost, s_stream);
+	cudaStreamSynchronize(s_stream);
+
+	// Process the output tensor with class remapping
+	int batch = s_outputDims.d[0];     // should be 1
+	int num_classes = s_outputDims.d[1];
+	int height = s_outputDims.d[2];
+	int width = s_outputDims.d[3];
+
+	// Create a Torch tensor from the output data
+	auto last_output_tensor = torch::from_blob(
+		last_h_output, { batch, num_classes, height, width }, torch::kFloat32);
+
+	// Get segmentation prediction via argmax along the class channel
+	auto max_out = torch::max(last_output_tensor, 1);
+	auto class_labels = std::get<1>(max_out);
+
+	// *** CLASS REMAPPING ***
+	auto remapped_labels = torch::zeros_like(class_labels);
+
+	// Map new model classes to original model classes
+	remapped_labels = torch::where(class_labels == 7,
+		torch::full_like(class_labels, 0),
+		remapped_labels);
+
+	remapped_labels = torch::where(class_labels == 11,
+		torch::full_like(class_labels, 1),
+		remapped_labels);
+
+	remapped_labels = torch::where(class_labels == 21,
+		torch::full_like(class_labels, 3),
+		remapped_labels);
+
+	remapped_labels = torch::where(class_labels == 23,
+		torch::full_like(class_labels, 4),
+		remapped_labels);
+
+	remapped_labels = torch::where(class_labels == 26,
+		torch::full_like(class_labels, 5),
+		remapped_labels);
+
+	// Apply scaling to the remapped labels
+	int scale = 255 / 21;
+	auto image_post = remapped_labels * scale;
+
+	// Convert the single segmentation mask to a cv::Mat
+	auto single_image_post = image_post[0].squeeze().to(torch::kU8);
+	cv::Mat cv_img(single_image_post.size(0), single_image_post.size(1), CV_8UC1,
+		single_image_post.data_ptr<uint8_t>());
+	grayscale_images.push_back(cv_img.clone());
+
+	return grayscale_images;
+}
+
+void TRTInference::cleanupTRTEngine() {
+	if (s_graphInitialized) {
+		if (s_graphExec) {
+			cudaGraphExecDestroy(s_graphExec);
+			s_graphExec = nullptr;
+		}
+		if (s_graph) {
+			cudaGraphDestroy(s_graph);
+			s_graph = nullptr;
+		}
+
+		// Free persistent memory
+		if (s_d_input) {
+			cudaFree(s_d_input);
+			s_d_input = nullptr;
+		}
+
+		for (float* h_output : s_h_outputs) {
+			delete[] h_output;
+		}
+		s_h_outputs.clear();
+
+		for (void* d_output : s_d_outputs) {
+			cudaFree(d_output);
+		}
+		s_d_outputs.clear();
+
+		if (s_stream) {
+			cudaStreamDestroy(s_stream);
+			s_stream = nullptr;
+		}
+
+		s_graphInitialized = false;
+	}
+
+	if (s_initialized) {
+		if (s_context) {
+			s_context->destroy();
+			s_context = nullptr;
+		}
+		if (s_engine) {
+			s_engine->destroy();
+			s_engine = nullptr;
+		}
+		if (s_runtime) {
+			s_runtime->destroy();
+			s_runtime = nullptr;
+		}
+		s_initialized = false;
+		std::cout << "TensorRT engine resources cleaned up." << std::endl;
+	}
+}
 
 // Single Image Segmantion Inference
 void TRTInference::measure_segmentation_trt_performance(const string& trt_plan, torch::Tensor img_tensor, int num_trials) {
@@ -409,6 +732,51 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_mul(cons
     auto max_out = torch::max(last_output_tensor, 1);
     auto class_labels = std::get<1>(max_out);
 
+	// ================== DEBUGGING CODE START ==================
+// Print the tensor shape and data type
+	std::cout << "Class labels tensor shape: " << class_labels.sizes() << std::endl;
+	std::cout << "Class labels data type: " << class_labels.dtype() << std::endl;
+
+	// Count and print each unique class value
+	// Move the tensor to CPU if needed for easy access
+	auto cpu_labels = class_labels.to(torch::kCPU);
+	auto flat_labels = cpu_labels.flatten();
+
+	// Count class occurrences manually
+	std::map<int64_t, int> class_counts;
+	for (int i = 0; i < flat_labels.numel(); i++) {
+		int64_t class_val = flat_labels[i].item<int64_t>();
+		class_counts[class_val]++;
+	}
+
+	// Print class distribution
+	std::cout << "Class distribution (pixels per class):" << std::endl;
+	for (const auto& pair : class_counts) {
+		int64_t class_idx = pair.first;
+		int count = pair.second;
+		float percentage = (float)count / flat_labels.numel() * 100;
+		std::cout << "Class " << class_idx << ": " << count << " pixels ("
+			<< percentage << "% of image)" << std::endl;
+
+		// Create a binary mask for this class
+		auto mask = (cpu_labels == class_idx).to(torch::kU8) * 255;
+		if (batch == 1) {  // Handle single batch case
+			auto mask_2d = mask[0];  // Get first batch item
+			cv::Mat debug_mask(mask_2d.size(0), mask_2d.size(1), CV_8UC1,
+				mask_2d.data_ptr<uint8_t>());
+
+			// Save this class mask
+			try {
+				cv::imwrite("pngOutput/class_" + std::to_string(class_idx) + "_mask.png", debug_mask);
+				std::cout << "Saved mask for class " << class_idx << std::endl;
+			}
+			catch (const cv::Exception& ex) {
+				std::cerr << "Failed to save class mask: " << ex.what() << std::endl;
+			}
+		}
+	}
+	// ================== DEBUGGING CODE END ==================
+
     int scale = 255 / 21;
     auto scale_tensor = torch::tensor(scale, class_labels.options());
     auto image_post = class_labels * scale;
@@ -449,11 +817,12 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_mul(cons
     return grayscale_images;  // return
 }
 
-std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_mul_OPT(const std::string& trt_plan, torch::Tensor img_tensor_batch, int num_trials)
+std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_mul_OPT(
+	const std::string& trt_plan, torch::Tensor img_tensor, int num_trials)
 {
-	std::vector<cv::Mat> grayscale_images;  // for saving each grayscale image
+	std::vector<cv::Mat> grayscale_images;  // for saving the grayscale segmentation image
 
-	std::cout << "STARTING measure_segmentation_trt_performance_mul" << std::endl;
+	std::cout << "STARTING measure_segmentation_trt_performance_mul (Single Frame)" << std::endl;
 	TRTGeneration::CustomLogger myLogger;
 	IRuntime* runtime = createInferRuntime(myLogger);
 
@@ -470,11 +839,13 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_mul_OPT(
 		exit(EXIT_FAILURE);
 	}
 
-	// Check that the input tensor is on CUDA.
-	TORCH_CHECK(img_tensor_batch.device().is_cuda(), "Input tensor must be on CUDA");
+	// ***********************************************************************
+	// The input tensor is now expected to be a GPU tensor with batch size 1.
+	// ***********************************************************************
+	TORCH_CHECK(img_tensor.device().is_cuda(), "Input tensor must be on CUDA");
 
 	// Calculate the total number of elements in the input tensor.
-	int input_size = img_tensor_batch.numel();
+	int input_size = img_tensor.numel();
 
 	// Create a CUDA stream.
 	cudaStream_t stream;
@@ -488,13 +859,12 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_mul_OPT(
 		exit(EXIT_FAILURE);
 	}
 
-	// Instead of copying from host memory, perform a device-to-device copy:
-	// Copy directly from the GPU tensor's data pointer to the allocated GPU memory.
+	// Device-to-device copy directly from the GPU tensor's data pointer.
 	cudaError_t copyErr = cudaMemcpyAsync(
 		d_input,
-		img_tensor_batch.data_ptr<float>(),  // already on the GPU
+		img_tensor.data_ptr<float>(),  // already on the GPU
 		input_size * sizeof(float),
-		cudaMemcpyDeviceToDevice,  // device-to-device copy
+		cudaMemcpyDeviceToDevice,
 		stream);
 	if (copyErr != cudaSuccess) {
 		std::cerr << "CUDA error (device-to-device cudaMemcpyAsync): "
@@ -506,30 +876,25 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_mul_OPT(
 	std::vector<void*> bindings;
 	bindings.push_back(d_input);
 
-	// Set up output bindings as before.
+	// Set up output bindings.
 	int numBindings = engine->getNbBindings();
-	nvinfer1::Dims4 inputDims;
-	nvinfer1::Dims outputDims;
 	std::vector<int> outputBindingIndices;
-	std::vector<std::string> outputTensorNames;
-
-	// Assume binding 0 is input; output bindings start at index 1.
 	for (int i = 1; i < numBindings; ++i) {
 		outputBindingIndices.push_back(i);
-		std::string outputTensorName = engine->getBindingName(i);
-		outputTensorNames.push_back(outputTensorName);
 	}
 
-	// Extract dimensions from the input tensor (assuming 4D: NCHW)
-	inputDims.d[0] = img_tensor_batch.size(0);
-	inputDims.d[1] = img_tensor_batch.size(1);
-	inputDims.d[2] = img_tensor_batch.size(2);
-	inputDims.d[3] = img_tensor_batch.size(3);
+	// Extract dimensions from the input tensor (assuming shape [1, C, H, W]).
+	nvinfer1::Dims4 inputDims;
+	inputDims.d[0] = img_tensor.size(0);  // should be 1
+	inputDims.d[1] = img_tensor.size(1);
+	inputDims.d[2] = img_tensor.size(2);
+	inputDims.d[3] = img_tensor.size(3);
 	context->setBindingDimensions(0, inputDims);
 
 	// Allocate memory for outputs.
 	std::vector<void*> d_outputs;
 	std::vector<float*> h_outputs;
+	nvinfer1::Dims outputDims;
 	for (int i : outputBindingIndices) {
 		outputDims = engine->getBindingDimensions(i);
 		// Fix dynamic dimensions if necessary.
@@ -538,7 +903,6 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_mul_OPT(
 				outputDims.d[j] = inputDims.d[j];
 			}
 		}
-
 		int outputSize = outputDims.d[0] * outputDims.d[1] * outputDims.d[2] * outputDims.d[3];
 		float* h_output = new float[outputSize];  // allocate host memory for output
 		void* d_output;
@@ -557,7 +921,7 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_mul_OPT(
 		context->enqueueV2(bindings.data(), stream, nullptr);
 	}
 
-	// Timing inference using CUDA events
+	// Timing inference using CUDA events.
 	std::vector<float> latencies;
 	cudaEvent_t start, stop;
 	cudaEventCreate(&start);
@@ -566,13 +930,11 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_mul_OPT(
 
 	// Run inference trials.
 	for (int i = 0; i < num_trials; ++i) {
-		// Optionally annotate with NVTX if desired.
 		if (!context->enqueueV2(bindings.data(), stream, nullptr)) {
 			std::cerr << "TensorRT enqueueV2 failed!" << std::endl;
 			exit(EXIT_FAILURE);
 		}
 	}
-
 	cudaEventRecord(stop, stream);
 	cudaEventSynchronize(stop);
 
@@ -580,14 +942,14 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_mul_OPT(
 	cudaEventElapsedTime(&milliseconds, start, stop);
 	latencies.push_back(milliseconds);
 
-	// Copy last output tensor back to host after all trials.
+	// Copy the last output tensor back to host after all trials.
 	float* last_h_output = h_outputs.back();
 	void* last_d_output = d_outputs.back();
 	int last_output_size = outputDims.d[0] * outputDims.d[1] * outputDims.d[2] * outputDims.d[3];
 	cudaMemcpyAsync(last_h_output, last_d_output, last_output_size * sizeof(float), cudaMemcpyDeviceToHost, stream);
 	cudaStreamSynchronize(stream);
 
-	// Calculate statistics on the last output.
+	// Print statistics on the last output.
 	float min_val = *std::min_element(last_h_output, last_h_output + last_output_size);
 	float max_val = *std::max_element(last_h_output, last_h_output + last_output_size);
 	float avg_val = std::accumulate(last_h_output, last_h_output + last_output_size, 0.0f) / last_output_size;
@@ -600,34 +962,110 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_mul_OPT(
 	cudaEventDestroy(start);
 	cudaEventDestroy(stop);
 
-	int batch = outputDims.d[0];       // batch dimension
-	int num_classes = outputDims.d[1];   // class channels
+	// ***********************************************************************
+	// Now process the output tensor.
+	// For a batch size of one, output dimensions are assumed to be [1, num_classes, H, W].
+	// ***********************************************************************
+	int batch = outputDims.d[0];       // should be 1
+	int num_classes = outputDims.d[1];
 	int height = outputDims.d[2];
 	int width = outputDims.d[3];
 
+	// Create a Torch tensor from the output data.
 	auto last_output_tensor = torch::from_blob(
 		last_h_output, { batch, num_classes, height, width }, torch::kFloat32);
 
-	// Process the output tensor to get segmentation masks.
+	// Get segmentation prediction via argmax along the class channel.
 	auto max_out = torch::max(last_output_tensor, 1);
 	auto class_labels = std::get<1>(max_out);
-	int scale = 255 / 21;
-	auto image_post = class_labels * scale;
 
-	// Convert each segmentation mask to cv::Mat and save.
-	for (int i = 0; i < batch; ++i) {
-		auto single_image_post = image_post[i].squeeze().to(torch::kU8);
-		cv::Mat cv_img(single_image_post.size(0), single_image_post.size(1), CV_8UC1,
-			single_image_post.data_ptr<uchar>());
-		grayscale_images.push_back(cv_img.clone());
-		try {
-			cv::imwrite("pngOutput/trt_seg_output_scaled_" + std::to_string(i) + ".png", cv_img);
-			std::cout << "Saved IMG: trt_seg_output_scaled_" + std::to_string(i) << std::endl;
-		}
-		catch (const cv::Exception& ex) {
-			std::cerr << "Failed to save image trt_seg_output_scaled_" + std::to_string(i)
-				<< " because ERROR:" << ex.what() << std::endl;
-		}
+	// *** CLASS REMAPPING ***
+	// Create remapped labels tensor initialized with zeros
+	auto remapped_labels = torch::zeros_like(class_labels);
+
+	// Map new model classes to original model classes
+	// Class 7 (27.37%) -> Class 0 (22.67%)
+	remapped_labels = torch::where(class_labels == 7,
+		torch::full_like(class_labels, 0),
+		remapped_labels);
+
+	// Class 11 (56.49%) -> Class 1 (37.54%)
+	remapped_labels = torch::where(class_labels == 11,
+		torch::full_like(class_labels, 1),
+		remapped_labels);
+
+	// Class 21 (11.09%) -> Class 3 (28.18%)
+	remapped_labels = torch::where(class_labels == 21,
+		torch::full_like(class_labels, 3),
+		remapped_labels);
+
+	// Class 23 (1.47%) -> Class 4 (2.96%)
+	remapped_labels = torch::where(class_labels == 23,
+		torch::full_like(class_labels, 4),
+		remapped_labels);
+
+	// Class 26 (3.59%) -> Class 5 (3.15%)
+	remapped_labels = torch::where(class_labels == 26,
+		torch::full_like(class_labels, 5),
+		remapped_labels);
+//	// ================== DEBUGGING CODE START ==================
+//// Print the tensor shape and data type
+//	std::cout << "Class labels tensor shape: " << class_labels.sizes() << std::endl;
+//	std::cout << "Class labels data type: " << class_labels.dtype() << std::endl;
+//
+//	// Count and print each unique class value
+//	// Move the tensor to CPU if needed for easy access
+//	auto cpu_labels = class_labels.to(torch::kCPU);
+//	auto flat_labels = cpu_labels.flatten();
+//
+//	// Count class occurrences manually
+//	std::map<int64_t, int> class_counts;
+//	for (int i = 0; i < flat_labels.numel(); i++) {
+//		int64_t class_val = flat_labels[i].item<int64_t>();
+//		class_counts[class_val]++;
+//	}
+//
+//	// Print class distribution
+//	std::cout << "Class distribution (pixels per class):" << std::endl;
+//	for (const auto& pair : class_counts) {
+//		int64_t class_idx = pair.first;
+//		int count = pair.second;
+//		float percentage = (float)count / flat_labels.numel() * 100;
+//		std::cout << "Class " << class_idx << ": " << count << " pixels ("
+//			<< percentage << "% of image)" << std::endl;
+//
+//		// Create a binary mask for this class
+//		auto mask = (cpu_labels == class_idx).to(torch::kU8) * 255;
+//		if (batch == 1) {  // Handle single batch case
+//			auto mask_2d = mask[0];  // Get first batch item
+//			cv::Mat debug_mask(mask_2d.size(0), mask_2d.size(1), CV_8UC1,
+//				mask_2d.data_ptr<uint8_t>());
+//
+//			// Save this class mask
+//			try {
+//				cv::imwrite("pngOutput/class_" + std::to_string(class_idx) + "_mask.png", debug_mask);
+//				std::cout << "Saved mask for class " << class_idx << std::endl;
+//			}
+//			catch (const cv::Exception& ex) {
+//				std::cerr << "Failed to save class mask: " << ex.what() << std::endl;
+//			}
+//		}
+//	}
+//	// ================== DEBUGGING CODE END ==================
+	int scale = 255 / 21;
+	auto image_post = remapped_labels * scale;
+
+	// Convert the single segmentation mask to a cv::Mat.
+	auto single_image_post = image_post[0].squeeze().to(torch::kU8);
+	cv::Mat cv_img(single_image_post.size(0), single_image_post.size(1), CV_8UC1,
+		single_image_post.data_ptr<uchar>());
+	grayscale_images.push_back(cv_img.clone());
+	try {
+		cv::imwrite("pngOutput/trt_seg_output_scaled.png", cv_img);
+		std::cout << "Saved IMG: trt_seg_output_scaled.png" << std::endl;
+	}
+	catch (const cv::Exception& ex) {
+		std::cerr << "Failed to save image trt_seg_output_scaled due to ERROR:" << ex.what() << std::endl;
 	}
 
 	// Cleanup: free allocated host and device memory, destroy context, engine, runtime, and stream.
@@ -644,8 +1082,13 @@ std::vector<cv::Mat> TRTInference::measure_segmentation_trt_performance_mul_OPT(
 	cudaStreamDestroy(stream);
 
 	return grayscale_images;
-	// =======
 }
+
+
+
+
+
+
 
 
 

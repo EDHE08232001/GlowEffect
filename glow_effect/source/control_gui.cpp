@@ -22,7 +22,7 @@
  // Global Variables
 int button_id = 0; // Currently selected button ID.
 int param_KeyScale = 600;  // Key scale parameter controlled by slider.
-int param_KeyLevel = 96;   // Key level parameter controlled by slider.
+int param_KeyLevel = 96;   // Key level parameter controlled by slider. 96
 int default_scale = 10;    // Default scale parameter controlled by slider.
 
 /**

@@ -36,6 +36,15 @@ using namespace nvonnxparser;
  */
 class TRTInference {
 public:
+
+	static bool initializeTRTEngine(const std::string& trt_plan);
+
+	// New method for inference using pre-loaded engine
+	static std::vector<cv::Mat> performSegmentationInference(torch::Tensor img_tensor, int num_trials = 1);
+
+	// Cleanup method to release resources
+	static void cleanupTRTEngine();
+
 	/**
 	 * @brief Measures the performance of TRT inference on super-resolution models.
 	 *
@@ -128,6 +137,26 @@ public:
 	 * @return Vector of segmentation mask images
 	 */
 	static std::vector<cv::Mat> measure_segmentation_trt_performance_single_batch_parallel(const std::string& trt_plan, const std::vector<torch::Tensor>& img_tensors, int num_streams);
+
+private:
+
+	static IRuntime* s_runtime;
+	static ICudaEngine* s_engine;
+	static IExecutionContext* s_context;
+	static bool s_initialized;
+
+	static cudaGraph_t s_graph;
+	static cudaGraphExec_t s_graphExec;
+	static bool s_graphInitialized;
+	static void* s_d_input;            // Persistent device memory for input
+	static std::vector<void*> s_d_outputs; // Persistent device memory for outputs
+	static std::vector<float*> s_h_outputs; // Persistent host memory for outputs
+	static std::vector<void*> s_bindings;  // Persistent bindings
+	static cudaStream_t s_stream;       // Persistent CUDA stream
+	static nvinfer1::Dims s_outputDims; // Output dimensions
+
+	// Initialize CUDA Graph
+	static bool initializeCudaGraph(const torch::Tensor& sample_tensor);
 };
 
 #endif // TRT_INFERENCE_HPP
