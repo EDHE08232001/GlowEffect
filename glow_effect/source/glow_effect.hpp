@@ -119,7 +119,6 @@ void glow_effect_video_single_batch_parallel_optimized(const char* video_nm, std
 void glow_blow(const cv::Mat& mask, cv::Mat& dst_rgba, int param_KeyLevel, int Delta);
 
 /**
-<<<<<<< HEAD
  * @brief Applies mipmapping and other transformations to an image.
  *
  * @param src The source image.

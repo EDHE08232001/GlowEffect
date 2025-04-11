@@ -112,7 +112,7 @@ int main() {
 		// Launch the GUI control thread.
 		std::thread guiThread(set_control);
 
-		std::string planFilePath = "D:/csi4900/TRT-Plans/mobileone_s4.edhe.plan";
+		std::string planFilePath = "D:/csi4900/TRT-Plans/mobileones4_1.lwfixed.plan";
 		std::string userInput;
 
 		printf("Do you want to input a single image, an image directory, or a video file? (single/directory/video): ");
@@ -238,10 +238,6 @@ int main() {
 			}
 		}
 		else if (userInput == "video" || userInput == "v") {
-			/*std::cout << "PyTorch version: " << TORCH_VERSION << std::endl;
-			std::cout << "CUDA Available: " << torch::cuda::is_available() << std::endl;
-			std::cout << "CUDA Version in PyTorch: " << TORCH_CUDA_VERSION << std::endl;
-			std::cout << "Number of CUDA Devices: " << torch::cuda::device_count() << std::endl;*/
 
 			std::string videoPath;
 			std::string planTypeOption;
@@ -257,10 +253,6 @@ int main() {
 				// Single-batch plan selected
 				std::string singleBatchPlanPath = "D:/csi4900/TRT-Plans/mobileones4_1.lwfixed.plan";
 				std::string videoInputOption;
-
-				int opt = 0;
-				printf("Would you like to use the optimized pipeline (1/0)?\n");
-				std::cin >> opt;
 
 				printf("Do you want to use default input video path? (y/n): ");
 				std::cin >> videoInputOption;
@@ -290,14 +282,7 @@ int main() {
 				}
 
 				try {
-					if (opt == 1) {
-						std::cout << "Using original processing..." << std::endl;
-						glow_effect_video_OPT(videoPath.c_str());
-					}
-					else {
-						std::cout << "Using optimized single-batch processing for MobileOneS4..." << std::endl;
-						glow_effect_video(videoPath.c_str());
-					}
+					glow_effect_video_single_batch_parallel(videoPath.c_str(), planFilePath);
 				}
 				catch (const std::exception& e) {
 					std::cerr << "Error processing video: " << e.what() << std::endl;

@@ -45,6 +45,9 @@ public:
 	// Cleanup method to release resources
 	static void cleanupTRTEngine();
 
+	static std::vector<cv::Mat> measure_segmentation_trt_performance_single_batch_parallel_preloaded(nvinfer1::ICudaEngine* engine, const std::vector<torch::Tensor>& img_tensors, int num_streams);
+
+
 	/**
 	 * @brief Measures the performance of TRT inference on super-resolution models.
 	 *

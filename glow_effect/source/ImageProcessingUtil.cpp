@@ -80,10 +80,9 @@ void ImageProcessingUtil::compareImages(const cv::Mat& generated_img, const cv::
 	double psnr = cv::PSNR(generated_img, gray_original);
 	std::cout << "PSNR: " << psnr << std::endl;
 
-//<<<<<<< HEAD
 //    std::cout << "PSNR: " << psnr << std::endl;
 //    std::cout << "SSIM: " << ssim << std::endl;
-//=======
+
 	// The following SSIM computation was removed because cv::quality::QualitySSIM
 	// is not available in your OpenCV build.
 	std::cout << "SSIM: not computed (cv::quality::QualitySSIM not available)" << std::endl;

@@ -39,7 +39,6 @@
 #include <iostream>
 #include <string>
 #include <opencv2/cudawarping.hpp>
-// <<<<<<< HEAD
 #include <opencv2/core.hpp>
 #include <opencv2/highgui.hpp>
 #include <opencv2/cudaimgproc.hpp>
@@ -49,35 +48,16 @@
 #include <chrono>
 #include <nvToolsExt.h>
 #include "resizeWithTexture.h"
-// #include <glow_effect/source_cu/mipmap.cu>
-
-// // Global Variable Array: button_State
-//bool button_State[5] = { false, false, false, false, false };
-
-
-#define FILTER_MORPH 1
-#define FILTER_GAUSS 1
-
-
-
-/**
- * @brief Applies a glowing effect to an image based on a segmentation mask.
- *
- * This function checks if the input segmentation mask contains regions that satisfy a specific condition.
- * If such regions are found, it creates an RGBA image with a pink overlay applied to all pixels.
- *
- * @param mask Input single-channel segmentation mask (CV_8UC1).
- * @param dst_rgba Output RGBA image (CV_8UC4) with the overlay applied.
- * @param param_KeyLevel Threshold level to determine target regions in the mask.
- * @param Delta Tolerance range around param_KeyLevel for determining target regions.
- */
-// =======
 #include <filesystem>
 #include "mipmap.h"
 #include "helper_cuda.h"  // For checkCudaErrors
 #include <future>         // For std::async, std::future
 #include <exception>
 #include <segmentation_kernels.h>
+
+#define FILTER_MORPH 1
+#define FILTER_GAUSS 1
+
 
 namespace fs = std::filesystem;
 
@@ -185,10 +165,6 @@ std::vector<cv::Mat> triple_buffered_mipmap_pipeline(const std::vector<cv::Mat>&
 ////////////////////////////////////////////////////////////////////////////////
 // Function: glow_blow
 ////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////
-// Function: glow_blow
-////////////////////////////////////////////////////////////////////////////////
-// >>>>>>> dc03d1e01975d937278105b157d6e05d46516332
 void glow_blow(const cv::Mat& mask, cv::Mat& dst_rgba, int param_KeyLevel, int Delta) {
 	if (mask.empty()) {
 		std::cerr << "Error: Segmentation mask is empty." << std::endl;
@@ -245,18 +221,6 @@ void glow_blow(const cv::Mat& mask, cv::Mat& dst_rgba, int param_KeyLevel, int D
 	}
 }
 
-/**
- * @brief Applies a mipmap-like operation to a grayscale image, producing an RGBA output image.
- *
- * This function filters an input grayscale image based on a specified key level. Pixels matching the key level
- * are preserved with full opacity in an RGBA output image, while others are set to transparent. It also applies
- * a custom filter operation (filter_mipmap) on the processed data.
- *
- * @param input_gray Input single-channel grayscale image (CV_8UC1).
- * @param output_image Output RGBA image (CV_8UC4) with the mipmap operation applied.
- * @param scale Scaling factor used in the mipmap filter operation.
- * @param param_KeyLevel Grayscale value to determine target pixels in the input image.
- */
 
 ////////////////////////////////////////////////////////////////////////////////
 // Function: apply_mipmap (Synchronous Version)
@@ -450,10 +414,6 @@ cv::Mat threshold_mask_to_rgba(const cv::Mat& grayscale_mask, int param_KeyLevel
 	return mask_rgba;
 }
 
-
-
-
-
 /**
  * @brief Applies a glow effect to an input image using a grayscale mask.
  *
@@ -463,7 +423,6 @@ cv::Mat threshold_mask_to_rgba(const cv::Mat& grayscale_mask, int param_KeyLevel
  * @param image_nm Path to the source image file.
  * @param grayscale_mask Input grayscale mask image (CV_8UC1).
  */
-
 ////////////////////////////////////////////////////////////////////////////////
 // Function: glow_effect_image
 ////////////////////////////////////////////////////////////////////////////////
@@ -488,8 +447,6 @@ void glow_effect_image(const char* image_nm, const cv::Mat& grayscale_mask) {
 }
 
 
-
-
 /**
 * Old pipeline.
  * @brief Applies a glow effect to each frame of a video using segmentation and image processing.
@@ -500,7 +457,6 @@ void glow_effect_image(const char* image_nm, const cv::Mat& grayscale_mask) {
  *
  * @param video_nm Path to the input video file.
  */
-
 void glow_effect_video(const char* video_nm) {
 	auto start_time = std::chrono::high_resolution_clock::now();
 	// Print OpenCV build information for debugging.
@@ -577,10 +533,10 @@ void glow_effect_video(const char* video_nm) {
 		// Perform TensorRT inference to obtain segmentation masks.
 		std::vector<cv::Mat> grayscale_masks = TRTInference::measure_segmentation_trt_performance_mul(planFilePath, batch_tensor, 1);
 
-		for (int i = 0; i < grayscale_masks.size(); i++) {
+		/*for (int i = 0; i < grayscale_masks.size(); i++) {
 			cv::imshow("Segmentation Mask", grayscale_masks[i]);
 			cv::waitKey(1);
-		}
+		}*/
 
 
 		if (!grayscale_masks.empty()) {
@@ -663,7 +619,7 @@ void glow_effect_video(const char* video_nm) {
 }
 
 /*
-* This is currently the pipeline used.
+* Preload engine serial pipline
 */
 void glow_effect_video_OPT(const char* video_nm) {
 	param_KeyLevel = 56;  // Use 56 as the target segmentation value.
@@ -817,7 +773,6 @@ void glow_effect_video_OPT(const char* video_nm) {
 
     std::cout << "Video processing completed. Saved to: " << output_video_path << std::endl;
 }
-
 
 
 void glow_effect_video_triple_buffer(const char* video_nm, std::string planFilePath) {
@@ -1126,8 +1081,6 @@ cleanup:
 	cv::destroyAllWindows();
 	std::cout << "Video processing completed. Saved to: " << output_video_path << std::endl;
 }
-
-
 
 ////////////////////////////////////////////////////////////////////////////////
 // Function: glow_effect_video_graph
@@ -1525,21 +1478,17 @@ cleanup:
  * @param planFilePath Path to the single-batch TensorRT plan file
  */
 void glow_effect_video_single_batch_parallel(const char* video_nm, std::string planFilePath) {
-	std::cout << "Starting glow effect video processing with single value detection and triple buffering" << std::endl;
+	std::cout << "Starting optimized glow effect video processing with reduced latency" << std::endl;
 
 	// *** SET YOUR SPECIFIC TARGET VALUE HERE ***
-	param_KeyLevel = 50;  // Change this to your desired segmentation class value
-	param_KeyScale = 1000; // Ensure we have proper intensity set for blending
+	param_KeyLevel = 56;  // Change this to your desired segmentation class value
+	param_KeyScale = 600; // Ensure we have proper intensity set for blending
 
-	// Set to 0 for exact matching only, or a small value (1-2) for minimal tolerance
+	// Set to 0 for exact matching only, or a small value (1-2) for minimal tolerance; here we use 20
 	const int EXACT_DETECTION_DELTA = 20;
 
 	// Performance timing
 	auto total_start = std::chrono::high_resolution_clock::now();
-
-	// Output OpenCV build information
-	cv::String info = cv::getBuildInformation();
-	std::cout << info << std::endl;
 
 	// Open video
 	cv::VideoCapture video;
@@ -1552,21 +1501,18 @@ void glow_effect_video_single_batch_parallel(const char* video_nm, std::string p
 	int frame_width = static_cast<int>(video.get(cv::CAP_PROP_FRAME_WIDTH));
 	int frame_height = static_cast<int>(video.get(cv::CAP_PROP_FRAME_HEIGHT));
 	int fps = static_cast<int>(video.get(cv::CAP_PROP_FPS));
-
 	cv::Size defaultSize((frame_width > 0) ? frame_width : 640, (frame_height > 0) ? frame_height : 360);
 
 	// Create output directory if needed
 	if (!fs::exists("./VideoOutput/")) {
-		if (fs::create_directory("./VideoOutput/"))
-			std::cout << "Video Output Directory successfully created." << std::endl;
-		else {
+		if (!fs::create_directory("./VideoOutput/")) {
 			std::cerr << "Failed to create video output folder." << std::endl;
 			return;
 		}
 	}
 
 	// Create output video writer
-	std::string output_video_path = "./VideoOutput/processed_video_single_value_triple_buffered.avi";
+	std::string output_video_path = "./VideoOutput/processed_video_optimized.avi";
 	cv::VideoWriter output_video(output_video_path,
 		cv::VideoWriter::fourcc('M', 'J', 'P', 'G'),
 		fps, cv::Size((frame_width > 0) ? frame_width : defaultSize.width,
@@ -1577,41 +1523,64 @@ void glow_effect_video_single_batch_parallel(const char* video_nm, std::string p
 		return;
 	}
 
+	// --- OPTIMIZATION: Load TensorRT engine once at the beginning ---
+	TRTGeneration::CustomLogger myLogger;
+	nvinfer1::IRuntime* runtime = nvinfer1::createInferRuntime(myLogger);
+
+	// Load plan file
+	std::ifstream planFile(planFilePath, std::ios::binary);
+	if (!planFile.is_open()) {
+		std::cerr << "Error: Could not open plan file: " << planFilePath << std::endl;
+		return;
+	}
+
+	std::vector<char> plan((std::istreambuf_iterator<char>(planFile)),
+		std::istreambuf_iterator<char>());
+	std::cout << "Loaded TensorRT plan: " << plan.size() / (1024 * 1024) << " MiB" << std::endl;
+
+	// Deserialize the engine
+	auto engine_load_start = std::chrono::high_resolution_clock::now();
+	nvinfer1::ICudaEngine* engine = runtime->deserializeCudaEngine(plan.data(), plan.size());
+	auto engine_load_end = std::chrono::high_resolution_clock::now();
+
+	if (!engine) {
+		std::cerr << "Error: Failed to deserialize CUDA engine" << std::endl;
+		runtime->destroy();
+		return;
+	}
+
+	double engine_load_time = std::chrono::duration<double>(engine_load_end - engine_load_start).count();
+	std::cout << "Engine deserialization time: " << engine_load_time << " seconds" << std::endl;
+
 	// Performance metrics
 	int total_frames = 0;
 	double segmentation_time = 0.0;
 	double post_processing_time = 0.0;
-	double mipmap_time = 0.0;
+	// Note: The previous mipmap_time variable and triple buffering allocations are removed.
 
-	// Number of parallel streams to use
-	const int NUM_PARALLEL_STREAMS = 4;
+	// Number of parallel streams to use - REDUCED FROM 4 TO 2
+	const int NUM_PARALLEL_STREAMS = 2;
+
+	// Create the final result window - ONLY ONE WINDOW
+	cv::namedWindow("Final Result", cv::WINDOW_NORMAL);
 
 	// Main processing loop
 	cv::cuda::GpuMat gpu_frame;
 	std::vector<cv::Mat> original_frames;
 	std::vector<torch::Tensor> frame_tensors;
-
 	bool processing = true;
 	int batch_count = 0;
-
-	// Create new diagnostic windows
-	cv::namedWindow("Segmentation Mask", cv::WINDOW_NORMAL);
-	cv::namedWindow("Segmentation Visualization", cv::WINDOW_NORMAL);
-	cv::namedWindow("Glow Overlay", cv::WINDOW_NORMAL);
-	cv::namedWindow("Mipmap Result", cv::WINDOW_NORMAL);
-	cv::namedWindow("Before-After Comparison", cv::WINDOW_NORMAL);
 
 	std::cout << "TARGET VALUE: " << param_KeyLevel << " (using delta: " << EXACT_DETECTION_DELTA << ")" << std::endl;
 
 	while (processing) {
 		batch_count++;
-		std::cout << "Processing batch " << batch_count << std::endl;
 
 		// Clear containers for this batch
 		original_frames.clear();
 		frame_tensors.clear();
 
-		// Read a batch of frames (one for each parallel stream)
+		// Read a batch of frames (reduced from 4 to 2)
 		for (int i = 0; i < NUM_PARALLEL_STREAMS; ++i) {
 			cv::Mat frame;
 			if (!video.read(frame) || frame.empty()) {
@@ -1633,14 +1602,13 @@ void glow_effect_video_single_batch_parallel(const char* video_nm, std::string p
 
 			// Handle invalid frames
 			if (frame.empty() || frame.cols <= 0 || frame.rows <= 0) {
-				std::cerr << "Warning: Read frame " << i << " is invalid. Using default blank image." << std::endl;
 				frame = cv::Mat(defaultSize, CV_8UC3, cv::Scalar(0, 0, 0));
 			}
 
 			original_frames.push_back(frame.clone());
 
 			try {
-				// Preprocess frame for TensorRT
+				// Preprocess frame for TensorRT - OPTIMIZED PREPROCESSING
 				gpu_frame.upload(frame);
 				cv::cuda::GpuMat resized_gpu_frame;
 
@@ -1656,7 +1624,7 @@ void glow_effect_video_single_batch_parallel(const char* video_nm, std::string p
 				torch::Tensor frame_tensor = ImageProcessingUtil::process_img(resized_gpu_frame, false);
 				frame_tensor = frame_tensor.to(torch::kFloat);
 
-				// Make sure tensor has batch dimension of 1
+				// Ensure tensor has batch dimension of 1
 				if (frame_tensor.dim() == 3) {
 					frame_tensor = frame_tensor.unsqueeze(0);
 				}
@@ -1675,14 +1643,13 @@ void glow_effect_video_single_batch_parallel(const char* video_nm, std::string p
 			break;
 		}
 
-		// Measure segmentation time
+		// --- Run Segmentation Inference ---
 		auto seg_start = std::chrono::high_resolution_clock::now();
-
-		// Run segmentation in parallel using the updated function that properly handles CUDA Graphs
 		std::vector<cv::Mat> segmentation_masks;
 		try {
-			segmentation_masks = TRTInference::measure_segmentation_trt_performance_single_batch_parallel(
-				planFilePath, frame_tensors, NUM_PARALLEL_STREAMS);
+			// Use the preloaded engine instead of loading from the plan file
+			segmentation_masks = TRTInference::measure_segmentation_trt_performance_single_batch_parallel_preloaded(
+				engine, frame_tensors, NUM_PARALLEL_STREAMS);
 		}
 		catch (const std::exception& e) {
 			std::cerr << "Error in segmentation inference: " << e.what() << std::endl;
@@ -1692,27 +1659,21 @@ void glow_effect_video_single_batch_parallel(const char* video_nm, std::string p
 				segmentation_masks[i] = cv::Mat(384, 384, CV_8UC1, cv::Scalar(0));
 			}
 		}
-
 		auto seg_end = std::chrono::high_resolution_clock::now();
 		segmentation_time += std::chrono::duration<double>(seg_end - seg_start).count();
 
-		// Post-process each frame - first prepare all masks
+		// --- Post-Processing and Blending ---
 		auto pp_start = std::chrono::high_resolution_clock::now();
-
-		// Vector to hold all resized masks for the batch
-		std::vector<cv::Mat> resized_masks_batch;
-		std::vector<cv::Mat> glow_blow_results;
-
-		// First pass: resize masks and apply glow_blow
-		for (size_t i = 0; i < segmentation_masks.size() && i < original_frames.size(); ++i) {
+		// For each frame in the batch, do per-frame mipmapping/blending (no triple buffering)
+		for (size_t i = 0; i < original_frames.size() && i < segmentation_masks.size(); ++i) {
 			try {
-				// Resize segmentation mask to match original frame size
-				cv::Mat resized_mask;
+				// Determine target size (use original frame size if valid)
 				cv::Size targetSize = (original_frames[i].empty() || original_frames[i].cols <= 0 || original_frames[i].rows <= 0)
 					? defaultSize : original_frames[i].size();
 
+				// Resize the segmentation mask to match the original frame.
+				cv::Mat resized_mask;
 				try {
-					// Handle empty or invalid masks
 					if (segmentation_masks[i].empty() || segmentation_masks[i].cols <= 0 || segmentation_masks[i].rows <= 0) {
 						resized_mask = cv::Mat(targetSize, CV_8UC1, cv::Scalar(0));
 					}
@@ -1725,772 +1686,109 @@ void glow_effect_video_single_batch_parallel(const char* video_nm, std::string p
 					resized_mask = cv::Mat(targetSize, CV_8UC1, cv::Scalar(0));
 				}
 
-				// Store the resized mask for triple buffered mipmap processing
-				resized_masks_batch.push_back(resized_mask);
-
-				// Create visualization of the mask for display
-				cv::Mat exact_value_mask = cv::Mat::zeros(resized_mask.size(), CV_8UC1);
-				for (int y = 0; y < resized_mask.rows; ++y) {
-					for (int j = 0; j < resized_mask.cols; ++j) {
-						int mask_pixel = resized_mask.at<uchar>(y, j);
-						if (std::abs(mask_pixel - param_KeyLevel) <= EXACT_DETECTION_DELTA) {
-							exact_value_mask.at<uchar>(y, j) = 255; // Mark pixels matching our target
-						}
+				// Process the mask: enforce exact matching within tolerance.
+				cv::Mat processed_mask = resized_mask.clone();
+				for (int y = 0; y < processed_mask.rows; ++y) {
+					for (int x = 0; x < processed_mask.cols; ++x) {
+						unsigned char pixel_value = processed_mask.at<uchar>(y, x);
+						if (std::abs(pixel_value - param_KeyLevel) <= EXACT_DETECTION_DELTA)
+							processed_mask.at<uchar>(y, x) = param_KeyLevel;
+						else
+							processed_mask.at<uchar>(y, x) = 0;
 					}
 				}
 
-				// Display the exact match mask (only for the first frame in batch)
-				if (i == 0) {
-					cv::imshow("Segmentation Mask", exact_value_mask);
-				}
+				// Convert the processed mask to an RGBA image.
+				int tolerance = 0; // Adjust as needed
+				cv::Mat mask_rgba = threshold_mask_to_rgba(processed_mask, param_KeyLevel, tolerance);
 
-				// Visualize segmentation regions on original frame (using purple highlight)
-				cv::Mat visualization = original_frames[i].clone();
-				for (int y = 0; y < resized_mask.rows; ++y) {
-					for (int j = 0; j < resized_mask.cols; ++j) {
-						int mask_pixel = resized_mask.at<uchar>(y, j);
-						if (std::abs(mask_pixel - param_KeyLevel) <= EXACT_DETECTION_DELTA) {
-							// Draw a bright purple highlight
-							cv::Vec3b& pixel = visualization.at<cv::Vec3b>(y, j);
-							// Blend with original (50% original, 50% highlight)
-							pixel[0] = pixel[0] * 0.5 + 238 * 0.5; // B (purple component)
-							pixel[1] = pixel[1] * 0.5 + 130 * 0.5; // G
-							pixel[2] = pixel[2] * 0.5 + 238 * 0.5; // R (purple component)
-						}
-					}
-				}
-
-				// Display the segmentation visualization (only for the first frame in batch)
-				if (i == 0) {
-					cv::imshow("Segmentation Visualization", visualization);
-				}
-
-				// Apply enhanced glow blow effect with exact matching
+				// Generate the glow effect overlay.
 				cv::Mat dst_rgba;
-				glow_blow(resized_mask, dst_rgba, param_KeyLevel, EXACT_DETECTION_DELTA);
-
-				// Ensure proper RGBA format
+				glow_blow(processed_mask, dst_rgba, param_KeyLevel, EXACT_DETECTION_DELTA);
 				if (dst_rgba.channels() != 4) {
-					cv::cvtColor(dst_rgba, dst_rgba, cv::COLOR_BGR2BGRA);
+					cv::cvtColor(dst_rgba, dst_rgba, cv::COLOR_BGR2RGBA);
 				}
 
-				// Store the glow blow result
-				glow_blow_results.push_back(dst_rgba);
-
-				// Display the glow overlay (only for the first frame in batch)
-				if (i == 0) {
-					cv::imshow("Glow Overlay", dst_rgba);
+				// Convert the original frame to BGRA if needed.
+				cv::Mat src_rgba;
+				if (original_frames[i].channels() != 4) {
+					cv::cvtColor(original_frames[i], src_rgba, cv::COLOR_BGR2BGRA);
 				}
-			}
-			catch (const std::exception& e) {
-				std::cerr << "Error in mask preprocessing for frame " << i << ": " << e.what() << std::endl;
-				// Add placeholder blank mask and rgba output
-				cv::Size targetSize = (original_frames[i].empty() || original_frames[i].cols <= 0 || original_frames[i].rows <= 0)
-					? defaultSize : original_frames[i].size();
-				resized_masks_batch.push_back(cv::Mat(targetSize, CV_8UC1, cv::Scalar(0)));
-				glow_blow_results.push_back(cv::Mat(targetSize, CV_8UC4, cv::Scalar(0, 0, 0, 0)));
-			}
-		}
+				else {
+					src_rgba = original_frames[i].clone();
+				}
 
-		// Apply triple buffered mipmap processing to all masks at once
-		auto mipmap_start = std::chrono::high_resolution_clock::now();
-		std::vector<cv::Mat> mipmap_results;
-
-		if (!resized_masks_batch.empty()) {
-			mipmap_results = triple_buffered_mipmap_pipeline(
-				resized_masks_batch, frame_width, frame_height,
-				static_cast<float>(default_scale), param_KeyLevel
-			);
-		}
-
-		auto mipmap_end = std::chrono::high_resolution_clock::now();
-		mipmap_time += std::chrono::duration<double>(mipmap_end - mipmap_start).count();
-
-		// Display the first mipmap result (if available)
-		if (!mipmap_results.empty()) {
-			cv::imshow("Mipmap Result", mipmap_results[0]);
-		}
-
-		// Now process each frame with the precomputed mipmap results
-		for (size_t i = 0; i < original_frames.size() && i < glow_blow_results.size() && i < mipmap_results.size(); ++i) {
-			try {
-				// Blend original, glow, and mipmap
+				// Prepare the output image.
 				cv::Mat final_result;
-				mix_images(original_frames[i], glow_blow_results[i], mipmap_results[i], final_result, param_KeyScale);
+				final_result.create(src_rgba.size(), CV_8UC4);
 
-				// Handle empty result
-				if (final_result.empty() || final_result.size().width <= 0 || final_result.size().height <= 0) {
-					std::cerr << "Warning: Final blended image is empty for frame " << i
-						<< ". Creating blank output." << std::endl;
-					final_result = cv::Mat(defaultSize, CV_8UC4, cv::Scalar(0, 0, 0, 255));
-				}
+				// Blend using filter_and_blend (same as the OPT pipeline).
+				filter_and_blend(src_rgba.cols, src_rgba.rows, default_scale, param_KeyScale,
+					reinterpret_cast<uchar4*>(mask_rgba.data),
+					reinterpret_cast<uchar4*>(dst_rgba.data),
+					reinterpret_cast<uchar4*>(src_rgba.data),
+					reinterpret_cast<uchar4*>(final_result.data));
 
-				// Create side-by-side comparison (only for first frame in batch)
-				if (i == 0) {
-					cv::Mat comparison;
-					cv::Mat original_bgra;
-					cv::cvtColor(original_frames[i], original_bgra, cv::COLOR_BGR2BGRA);
-					cv::hconcat(original_bgra, final_result, comparison);
-					cv::imshow("Before-After Comparison", comparison);
-				}
-
-				// Display and write frame
-				if (i == 0) {
-					cv::imshow("Processed Frame (Triple Buffered)", final_result);
-				}
-
-				int key = cv::waitKey(1); // Reduced wait time for better performance
+				// Display and write the blended frame.
+				cv::imshow("Final Result", final_result);
+				int key = cv::waitKey(1);
 				if (key == 'q') {
 					processing = false;
 					break;
 				}
-
 				output_video.write(final_result);
 			}
 			catch (const std::exception& e) {
 				std::cerr << "Error in final frame composition for frame " << i << ": " << e.what() << std::endl;
-				// Create a blank output frame and continue
 				cv::Mat blank_output = cv::Mat(defaultSize, CV_8UC4, cv::Scalar(0, 0, 0, 255));
 				output_video.write(blank_output);
-				if (i == 0) {
-					cv::imshow("Processed Frame (Triple Buffered)", blank_output);
-					cv::waitKey(1);
-				}
+				cv::imshow("Final Result", blank_output);
+				cv::waitKey(1);
 			}
 		}
-
 		auto pp_end = std::chrono::high_resolution_clock::now();
 		post_processing_time += std::chrono::duration<double>(pp_end - pp_start).count();
 
-		// Report progress
-		std::cout << "Completed batch " << batch_count << " (" << original_frames.size()
-			<< " frames, total: " << total_frames << ")" << std::endl;
+		// Report progress every 10 batches.
+		if (batch_count % 10 == 0) {
+			std::cout << "Completed batch " << batch_count << " (" << total_frames
+				<< " frames, " << (total_frames / (std::chrono::duration<double>(
+					std::chrono::high_resolution_clock::now() - total_start).count())) << " fps)" << std::endl;
+		}
 	}
 
-	// Calculate and display performance metrics
+	// --- Cleanup ---
+
+	// Previously allocated triple-buffering resources have been removed.
+	if (engine) {
+		engine->destroy();
+	}
+	if (runtime) {
+		runtime->destroy();
+	}
+
 	auto total_end = std::chrono::high_resolution_clock::now();
 	double total_time = std::chrono::duration<double>(total_end - total_start).count();
-
-	// Clean up
+	double avg_time_per_batch = total_time / batch_count;
 	video.release();
 	output_video.release();
 	cv::destroyAllWindows();
 
-	// Output performance metrics
 	std::cout << "---------------------------------------------------" << std::endl;
-	std::cout << "Triple Buffered Single Value Detection Performance" << std::endl;
+	std::cout << "Optimized Processing Performance" << std::endl;
 	std::cout << "---------------------------------------------------" << std::endl;
-	std::cout << "Target value processed: " << param_KeyLevel << std::endl;
-	std::cout << "Delta tolerance: " << EXACT_DETECTION_DELTA << std::endl;
 	std::cout << "Total frames processed: " << total_frames << std::endl;
 	std::cout << "Total processing time: " << total_time << " seconds" << std::endl;
+	std::cout << "Engine loading time: " << engine_load_time << " seconds ("
+		<< (engine_load_time / total_time * 100.0) << "% of total)" << std::endl;
+	std::cout << "Average time per batch: " << avg_time_per_batch << " seconds" << std::endl;
 	if (total_frames > 0) {
-		std::cout << "Average time per frame: " << (total_time * 1000.0) / total_frames << " ms" << std::endl;
 		std::cout << "Effective frame rate: " << total_frames / total_time << " fps" << std::endl;
+		std::cout << "Segmentation time: " << segmentation_time << " seconds ("
+			<< (segmentation_time / total_time * 100.0) << "% of total)" << std::endl;
+		std::cout << "Post-processing time: " << post_processing_time << " seconds ("
+			<< (post_processing_time / total_time * 100.0) << "% of total)" << std::endl;
 	}
-	std::cout << "Segmentation time: " << segmentation_time << " seconds ("
-		<< (segmentation_time / total_time) * 100.0 << "%)" << std::endl;
-	std::cout << "Mipmap processing time: " << mipmap_time << " seconds ("
-		<< (mipmap_time / total_time) * 100.0 << "%)" << std::endl;
-	std::cout << "Post-processing time: " << post_processing_time << " seconds ("
-		<< (post_processing_time / total_time) * 100.0 << "%)" << std::endl;
-	std::cout << "Video processing completed with triple buffered acceleration." << std::endl;
-	std::cout << "Saved to: " << output_video_path << std::endl;
+	std::cout << "Video saved to: " << output_video_path << std::endl;
 	std::cout << "---------------------------------------------------" << std::endl;
-
-}
-
-
-
-
-void glow_effect_video_single_batch_parallel_optimized(const char* video_nm, std::string planFilePath) {
-	std::cout << "Starting optimized single-batch parallel processing" << std::endl;
-
-	// Performance measurement
-	auto total_start = std::chrono::high_resolution_clock::now();
-
-	// *** CRITICAL OPTIMIZATION #1: Fixed parameters for optimal performance ***
-	param_KeyLevel = 56;  // Use consistent value for targeting
-	param_KeyScale = 600; // Optimized value for glow intensity
-	default_scale = 10;   // Optimal mipmap scaling
-	const int DETECTION_DELTA = 20; // Tolerance level for segmentation
-
-	// *** CRITICAL OPTIMIZATION #2: Pre-create TensorRT resources once ***
-	TRTGeneration::CustomLogger myLogger;
-	IRuntime* runtime = createInferRuntime(myLogger);
-	ifstream planFile(planFilePath, ios::binary);
-	vector<char> plan((istreambuf_iterator<char>(planFile)), istreambuf_iterator<char>());
-	ICudaEngine* engine = runtime->deserializeCudaEngine(plan.data(), plan.size());
-	if (!engine) {
-		std::cerr << "Failed to deserialize engine" << std::endl;
-		return;
-	}
-
-	// Open video
-	cv::VideoCapture video;
-	if (!video.open(video_nm, cv::VideoCaptureAPIs::CAP_ANY)) {
-		std::cerr << "Error: Could not open video file: " << video_nm << std::endl;
-		engine->destroy();
-		runtime->destroy();
-		return;
-	}
-
-	// Get video properties
-	int frame_width = static_cast<int>(video.get(cv::CAP_PROP_FRAME_WIDTH));
-	int frame_height = static_cast<int>(video.get(cv::CAP_PROP_FRAME_HEIGHT));
-	int fps = static_cast<int>(video.get(cv::CAP_PROP_FPS));
-	cv::Size defaultSize((frame_width > 0) ? frame_width : 640, (frame_height > 0) ? frame_height : 360);
-
-	// Create output video writer
-	std::string output_video_path = "./VideoOutput/optimized_single_batch.mp4";
-	cv::VideoWriter output_video(output_video_path,
-		cv::VideoWriter::fourcc('m', 'p', '4', 'v'), // Use MP4 codec for better compression
-		fps, cv::Size(frame_width, frame_height));
-
-	if (!output_video.isOpened()) {
-		std::cerr << "Error: Could not open output video file" << std::endl;
-		video.release();
-		engine->destroy();
-		runtime->destroy();
-		return;
-	}
-
-	// *** OPTIMIZATION #3: Calculate fixed resource sizes ***
-	const int NUM_WORKERS = 4; // Number of parallel workers
-	const int MAX_INPUT_SIZE = 3 * 384 * 384; // Maximum input tensor size [1,3,384,384]
-	const int MAX_OUTPUT_SIZE = 21 * 384 * 384; // Maximum output size for segmentation [1,21,384,384]
-	const int MAX_MASK_SIZE = 384 * 384; // Maximum size of segmentation mask
-
-	// *** OPTIMIZATION #4: Pre-allocate GPU workspace for each worker ***
-	struct WorkerResources {
-		IExecutionContext* context;
-		cudaStream_t inferStream;
-		cudaStream_t postStream;
-		cudaGraph_t postprocessGraph;
-		cudaGraphExec_t postprocessGraphExec;
-
-		// Pinned memory and device memory for input/output
-		float* h_input;
-		void* d_input;
-		float* h_output;
-		void* d_output;
-		unsigned char* h_mask;
-		unsigned char* d_mask;
-
-		// OpenCV matrices used for results
-		cv::Mat resizedFrame;
-		cv::Mat segMask;
-		cv::Mat glowResult;
-		cv::Mat finalResult;
-
-		// Events for synchronization
-		cudaEvent_t inferDone;
-		cudaEvent_t postDone;
-
-		// Current frame data
-		int frameIndex;
-		bool busy;
-		bool hasGraph;
-	};
-
-	// *** OPTIMIZATION #5: Create worker pool with persistent resources ***
-	std::vector<WorkerResources> workers(NUM_WORKERS);
-
-	// Initialize workers with persistent resources
-	for (int i = 0; i < NUM_WORKERS; i++) {
-		WorkerResources& worker = workers[i];
-
-		// Create execution context
-		worker.context = engine->createExecutionContext();
-
-		// Create non-blocking CUDA streams
-		checkCudaErrors(cudaStreamCreateWithFlags(&worker.inferStream, cudaStreamNonBlocking));
-		checkCudaErrors(cudaStreamCreateWithFlags(&worker.postStream, cudaStreamNonBlocking));
-
-		// Create CUDA events for efficient synchronization
-		checkCudaErrors(cudaEventCreate(&worker.inferDone));
-		checkCudaErrors(cudaEventCreate(&worker.postDone));
-
-		// Allocate pinned memory once and reuse
-		checkCudaErrors(cudaMallocHost((void**)&worker.h_input, MAX_INPUT_SIZE * sizeof(float)));
-		checkCudaErrors(cudaMallocHost((void**)&worker.h_output, MAX_OUTPUT_SIZE * sizeof(float)));
-		checkCudaErrors(cudaMallocHost((void**)&worker.h_mask, MAX_MASK_SIZE * sizeof(unsigned char)));
-
-		// Allocate device memory once and reuse
-		checkCudaErrors(cudaMalloc(&worker.d_input, MAX_INPUT_SIZE * sizeof(float)));
-		checkCudaErrors(cudaMalloc(&worker.d_output, MAX_OUTPUT_SIZE * sizeof(float)));
-		checkCudaErrors(cudaMalloc(&worker.d_mask, MAX_MASK_SIZE * sizeof(unsigned char)));
-
-		// Pre-allocate OpenCV matrices
-		worker.resizedFrame = cv::Mat(384, 384, CV_8UC3);
-		worker.segMask = cv::Mat(384, 384, CV_8UC1);
-		worker.glowResult = cv::Mat(frame_height, frame_width, CV_8UC4);
-		worker.finalResult = cv::Mat(frame_height, frame_width, CV_8UC4);
-
-		// Initialize graph as null
-		worker.postprocessGraph = nullptr;
-		worker.postprocessGraphExec = nullptr;
-		worker.hasGraph = false;
-
-		// Set as not busy
-		worker.busy = false;
-		worker.frameIndex = -1;
-	}
-
-	// *** OPTIMIZATION #6: Pre-allocate a buffer for frame reading ***
-	cv::Mat frameBuffer;
-
-	// *** OPTIMIZATION #7: Create a frame queue for prefetching ***
-	const int PREFETCH_SIZE = 3;
-	std::queue<cv::Mat> frameQueue;
-	std::mutex queueMutex;
-
-	// *** OPTIMIZATION #8: Launch a dedicated prefetch thread ***
-	std::atomic<bool> stopPrefetching(false);
-	std::thread prefetchThread([&]() {
-		while (!stopPrefetching) {
-			cv::Mat frame;
-			if (!video.read(frame) || frame.empty()) {
-				break;
-			}
-
-			// Make a deep copy for the queue
-			cv::Mat frameCopy = frame.clone();
-
-			// Add to queue, with mutex protection
-			{
-				std::lock_guard<std::mutex> lock(queueMutex);
-				// Only keep up to PREFETCH_SIZE frames
-				if (frameQueue.size() < PREFETCH_SIZE) {
-					frameQueue.push(frameCopy);
-				}
-			}
-
-			// Don't spin too fast if queue is full
-			if (frameQueue.size() >= PREFETCH_SIZE) {
-				std::this_thread::sleep_for(std::chrono::milliseconds(5));
-			}
-		}
-		});
-
-	// *** OPTIMIZATION #9: Create dedicated display thread ***
-	std::atomic<bool> stopDisplaying(false);
-	std::queue<cv::Mat> displayQueue;
-	std::mutex displayMutex;
-	std::thread displayThread([&]() {
-		int displayEvery = 5; // Only display every 5th frame
-		int frameCount = 0;
-
-		while (!stopDisplaying) {
-			cv::Mat frameToDisplay;
-
-			// Try to get a frame from the queue
-			{
-				std::lock_guard<std::mutex> lock(displayMutex);
-				if (!displayQueue.empty()) {
-					frameToDisplay = displayQueue.front();
-					displayQueue.pop();
-					frameCount++;
-				}
-			}
-
-			// If we have a frame to display
-			if (!frameToDisplay.empty()) {
-				// Write to video file (always)
-				output_video.write(frameToDisplay);
-
-				// Display only every few frames
-				if (frameCount % displayEvery == 0) {
-					cv::imshow("Optimized Processing", frameToDisplay);
-					int key = cv::waitKey(1);
-					if (key == 'q') {
-						stopPrefetching = true;
-						break;
-					}
-				}
-			}
-			else {
-				// Short sleep to avoid CPU spinning
-				std::this_thread::sleep_for(std::chrono::milliseconds(1));
-			}
-		}
-		});
-
-	// Main processing loop - dispatch work to workers
-	int totalFrames = 0;
-	int currentWorker = 0;
-	bool processing = true;
-
-	// *** OPTIMIZATION #10: Pipeline processing instead of sequential ***
-	while (processing) {
-		cv::Mat currentFrame;
-
-		// Get a frame, either from prefetch queue or directly
-		{
-			std::lock_guard<std::mutex> lock(queueMutex);
-			if (!frameQueue.empty()) {
-				currentFrame = frameQueue.front();
-				frameQueue.pop();
-			}
-		}
-
-		// If no frame from queue, try direct read (fallback)
-		if (currentFrame.empty()) {
-			if (!video.read(currentFrame) || currentFrame.empty()) {
-				// End of video
-				processing = false;
-				break;
-			}
-		}
-
-		// Find a free worker
-		WorkerResources* worker = nullptr;
-		for (int attempt = 0; attempt < NUM_WORKERS * 2; attempt++) {
-			// Try the next worker in round-robin fashion
-			currentWorker = (currentWorker + 1) % NUM_WORKERS;
-
-			// Check if this worker is free
-			if (!workers[currentWorker].busy) {
-				worker = &workers[currentWorker];
-				worker->busy = true;
-				worker->frameIndex = totalFrames;
-				break;
-			}
-
-			// If all workers busy, check if any have finished
-			for (int w = 0; w < NUM_WORKERS; w++) {
-				if (workers[w].busy) {
-					cudaError_t status = cudaEventQuery(workers[w].postDone);
-					if (status == cudaSuccess) {
-						// This worker has finished processing
-
-						// Send result to display queue
-						{
-							std::lock_guard<std::mutex> lock(displayMutex);
-							displayQueue.push(workers[w].finalResult.clone());
-						}
-
-						// Mark as free
-						workers[w].busy = false;
-
-						// Use this worker
-						worker = &workers[w];
-						worker->busy = true;
-						worker->frameIndex = totalFrames;
-						currentWorker = w;
-						break;
-					}
-				}
-			}
-
-			if (worker) break;
-
-			// If we haven't found a worker, wait a bit
-			std::this_thread::sleep_for(std::chrono::milliseconds(1));
-		}
-
-		// If still no free worker, wait for any worker to finish
-		if (!worker) {
-			for (int w = 0; w < NUM_WORKERS; w++) {
-				checkCudaErrors(cudaEventSynchronize(workers[w].postDone));
-
-				// Send result to display queue
-				{
-					std::lock_guard<std::mutex> lock(displayMutex);
-					displayQueue.push(workers[w].finalResult.clone());
-				}
-
-				// Mark as free
-				workers[w].busy = false;
-			}
-
-			// Use the current worker
-			worker = &workers[currentWorker];
-			worker->busy = true;
-			worker->frameIndex = totalFrames;
-		}
-
-		// Now we have a worker, process the frame asynchronously
-		// *** OPTIMIZATION #11: Full pipelined frame processing ***
-
-		// 1. Resize to 384x384 and convert to tensor
-		cv::resize(currentFrame, worker->resizedFrame, cv::Size(384, 384));
-
-		// 2. Convert to float tensor and normalize (directly into pinned memory)
-		for (int y = 0; y < 384; y++) {
-			for (int x = 0; x < 384; x++) {
-				cv::Vec3b pixel = worker->resizedFrame.at<cv::Vec3b>(y, x);
-				// Convert BGR to RGB and normalize
-				float r = pixel[2] / 255.0f;
-				float g = pixel[1] / 255.0f;
-				float b = pixel[0] / 255.0f;
-
-				// Normalize using ImageNet mean/std
-				worker->h_input[(0 * 384 * 384) + (y * 384) + x] = (r - 0.485f) / 0.229f;
-				worker->h_input[(1 * 384 * 384) + (y * 384) + x] = (g - 0.456f) / 0.224f;
-				worker->h_input[(2 * 384 * 384) + (y * 384) + x] = (b - 0.406f) / 0.225f;
-			}
-		}
-
-		// 3. Copy input to device (async)
-		checkCudaErrors(cudaMemcpyAsync(
-			worker->d_input,
-			worker->h_input,
-			3 * 384 * 384 * sizeof(float),
-			cudaMemcpyHostToDevice,
-			worker->inferStream
-		));
-
-		// 4. Set up TensorRT bindings
-		nvinfer1::Dims4 inputDims = { 1, 3, 384, 384 };
-		worker->context->setBindingDimensions(0, inputDims);
-
-		std::vector<void*> bindings = {
-			worker->d_input,  // Input binding
-			worker->d_output  // Output binding
-		};
-
-		// 5. Run TensorRT inference (async)
-		if (!worker->context->enqueueV2(bindings.data(), worker->inferStream, nullptr)) {
-			std::cerr << "TensorRT enqueueV2 failed for frame " << totalFrames << std::endl;
-			worker->busy = false;
-			continue;
-		}
-
-		// 6. Record event when inference is done
-		checkCudaErrors(cudaEventRecord(worker->inferDone, worker->inferStream));
-
-		// 7. Make post-processing stream wait for inference to complete
-		checkCudaErrors(cudaStreamWaitEvent(worker->postStream, worker->inferDone, 0));
-
-		// 8. Run post-processing - either with CUDA graph or regular kernels
-		if (worker->hasGraph && worker->postprocessGraphExec) {
-			// Launch the captured graph
-			checkCudaErrors(cudaGraphLaunch(worker->postprocessGraphExec, worker->postStream));
-		}
-		else {
-			// Try to capture a graph on first iteration
-			if (!worker->hasGraph) {
-				try {
-					// Start capturing a graph
-					checkCudaErrors(cudaStreamBeginCapture(worker->postStream, cudaStreamCaptureModeRelaxed));
-
-					// Run the argmax kernel
-					launchArgmaxKernel(
-						(float*)worker->d_output,  // Input tensor
-						worker->d_mask,            // Output mask
-						1,                         // Batch size
-						21,                        // Number of classes
-						384,                       // Height
-						384,                       // Width
-						worker->postStream
-					);
-
-					// Finish capturing
-					checkCudaErrors(cudaStreamEndCapture(worker->postStream, &worker->postprocessGraph));
-
-					// Instantiate the graph
-					checkCudaErrors(cudaGraphInstantiate(
-						&worker->postprocessGraphExec,
-						worker->postprocessGraph,
-						nullptr, nullptr, 0
-					));
-
-					// Set graph as available
-					worker->hasGraph = true;
-
-					// Launch the captured graph
-					checkCudaErrors(cudaGraphLaunch(worker->postprocessGraphExec, worker->postStream));
-				}
-				catch (const std::exception& e) {
-					// If graph capture fails, fall back to regular kernel launch
-					std::cerr << "Graph capture failed: " << e.what() << std::endl;
-
-					// Run the argmax kernel directly
-					launchArgmaxKernel(
-						(float*)worker->d_output,  // Input tensor 
-						worker->d_mask,            // Output mask
-						1,                         // Batch size
-						21,                        // Number of classes
-						384,                       // Height
-						384,                       // Width
-						worker->postStream
-					);
-				}
-			}
-			else {
-				// Regular kernel launch for workers that failed graph capture
-				launchArgmaxKernel(
-					(float*)worker->d_output,  // Input tensor
-					worker->d_mask,            // Output mask
-					1,                         // Batch size
-					21,                        // Number of classes
-					384,                       // Height
-					384,                       // Width
-					worker->postStream
-				);
-			}
-		}
-
-		// 9. Copy segmentation mask back to host
-		checkCudaErrors(cudaMemcpyAsync(
-			worker->h_mask,
-			worker->d_mask,
-			384 * 384 * sizeof(unsigned char),
-			cudaMemcpyDeviceToHost,
-			worker->postStream
-		));
-
-		// 10. Create OpenCV mask from the result (on the host)
-		cv::Mat tempMask(384, 384, CV_8UC1, worker->h_mask);
-		tempMask.copyTo(worker->segMask);
-
-		// 11. Resize mask to original frame size
-		cv::Mat resizedMask;
-		cv::resize(worker->segMask, resizedMask, currentFrame.size());
-
-		// *** OPTIMIZATION #12: Efficient glow effect with precomputed values ***
-		// 12. Perform glow blow effect directly with mask
-		cv::Mat dstRGBA(currentFrame.size(), CV_8UC4, cv::Scalar(0, 0, 0, 0));
-
-		// 13. Apply direct glow effect without temporary buffers
-		// Processing in blocks for better cache locality
-		const int BLOCK_SIZE = 32;
-#pragma omp parallel for collapse(2)
-		for (int y = 0; y < resizedMask.rows; y += BLOCK_SIZE) {
-			for (int x = 0; x < resizedMask.cols; x += BLOCK_SIZE) {
-				// Process a block
-				for (int by = 0; by < BLOCK_SIZE && y + by < resizedMask.rows; by++) {
-					for (int bx = 0; bx < BLOCK_SIZE && x + bx < resizedMask.cols; bx++) {
-						int mask_pixel = resizedMask.at<uchar>(y + by, x + bx);
-						// Apply optimized filter directly
-						if (std::abs(mask_pixel - param_KeyLevel) < DETECTION_DELTA) {
-							// Apply glow directly
-							cv::Vec4b& pixel = dstRGBA.at<cv::Vec4b>(y + by, x + bx);
-							pixel[0] = 226;  // B
-							pixel[1] = 20;   // G
-							pixel[2] = 147;  // R
-							pixel[3] = 255;  // A
-						}
-					}
-				}
-			}
-		}
-
-		// 14. Apply mipmap filter in a single operation (in-place, directly using the mask)
-		cv::Mat mipmapResult;
-		apply_mipmap(resizedMask, mipmapResult, default_scale, param_KeyLevel);
-
-		// 15. Mix the original image and effects efficiently
-		cv::Mat srcRGBA;
-		cv::cvtColor(currentFrame, srcRGBA, cv::COLOR_BGR2BGRA);
-
-		// 16. Apply optimized blending directly
-#pragma omp parallel for collapse(2)
-		for (int y = 0; y < srcRGBA.rows; y += BLOCK_SIZE) {
-			for (int x = 0; x < srcRGBA.cols; x += BLOCK_SIZE) {
-				// Process a block
-				for (int by = 0; by < BLOCK_SIZE && y + by < srcRGBA.rows; by++) {
-					for (int bx = 0; bx < BLOCK_SIZE && x + bx < srcRGBA.cols; bx++) {
-						// Get the alpha value from mipmap result
-						uchar alpha = mipmapResult.at<cv::Vec4b>(y + by, x + bx)[3];
-						// Scale by param_KeyScale
-						alpha = (alpha * param_KeyScale) >> 8;
-
-						// Blend with original
-						cv::Vec4b src = srcRGBA.at<cv::Vec4b>(y + by, x + bx);
-						cv::Vec4b dst = dstRGBA.at<cv::Vec4b>(y + by, x + bx);
-						cv::Vec4b& output = worker->finalResult.at<cv::Vec4b>(y + by, x + bx);
-
-						// Optimized alpha blending
-						for (int k = 0; k < 4; ++k) {
-							int temp = (src[k] * (255 - alpha) + dst[k] * alpha) >> 8;
-							output[k] = static_cast<uchar>(std::min(255, std::max(0, temp)));
-						}
-					}
-				}
-			}
-		}
-
-		// 17. Record event when all processing is done
-		checkCudaErrors(cudaEventRecord(worker->postDone, worker->postStream));
-
-		// Count this frame and continue the loop
-		totalFrames++;
-	}
-
-	// Signal threads to stop
-	stopPrefetching = true;
-	if (prefetchThread.joinable()) {
-		prefetchThread.join();
-	}
-
-	// Wait for all workers to complete
-	for (auto& worker : workers) {
-		if (worker.busy) {
-			checkCudaErrors(cudaEventSynchronize(worker.postDone));
-
-			// Send final result to display queue
-			{
-				std::lock_guard<std::mutex> lock(displayMutex);
-				displayQueue.push(worker.finalResult.clone());
-			}
-		}
-	}
-
-	// Let display thread process remaining frames
-	std::this_thread::sleep_for(std::chrono::milliseconds(500));
-	stopDisplaying = true;
-	if (displayThread.joinable()) {
-		displayThread.join();
-	}
-
-	// Calculate performance metrics
-	auto total_end = std::chrono::high_resolution_clock::now();
-	double total_seconds = std::chrono::duration<double>(total_end - total_start).count();
-
-	// Clean up resources
-	for (auto& worker : workers) {
-		// Clean up CUDA graph resources
-		if (worker.postprocessGraphExec) {
-			cudaGraphExecDestroy(worker.postprocessGraphExec);
-		}
-		if (worker.postprocessGraph) {
-			cudaGraphDestroy(worker.postprocessGraph);
-		}
-
-		// Destroy events
-		cudaEventDestroy(worker.inferDone);
-		cudaEventDestroy(worker.postDone);
-
-		// Free memory
-		cudaFreeHost(worker.h_input);
-		cudaFreeHost(worker.h_output);
-		cudaFreeHost(worker.h_mask);
-		cudaFree(worker.d_input);
-		cudaFree(worker.d_output);
-		cudaFree(worker.d_mask);
-
-		// Destroy streams
-		cudaStreamDestroy(worker.inferStream);
-		cudaStreamDestroy(worker.postStream);
-
-		// Destroy context
-		worker.context->destroy();
-	}
-
-	// Destroy global resources
-	engine->destroy();
-	runtime->destroy();
-	video.release();
-	output_video.release();
-	cv::destroyAllWindows();
-
-	// Report performance
-	std::cout << "Optimized Processing Complete" << std::endl;
-	std::cout << "Total frames: " << totalFrames << std::endl;
-	std::cout << "Total time: " << total_seconds << " seconds" << std::endl;
-	std::cout << "Throughput: " << totalFrames / total_seconds << " FPS" << std::endl;
-	std::cout << "Average per frame: " << (total_seconds * 1000.0) / totalFrames << " ms" << std::endl;
-	std::cout << "Output saved to " << output_video_path << std::endl;
 }
