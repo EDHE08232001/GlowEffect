@@ -1,21 +1,21 @@
-﻿  Compiling CUDA source file source_cu\mipmap.cu...
+﻿  Compiling CUDA source file source_cu\segmentation_kernels.cu...
   Compiling CUDA source file source_cu\resizeWithTexture.cu...
-  Compiling CUDA source file source_cu\segmentation_kernels.cu...
+  Compiling CUDA source file source_cu\mipmap.cu...
+  
+  
+  D:\csi4900\glow_mipmap\glow_effect>"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\bin\nvcc.exe" -gencode=arch=compute_75,code=\"sm_75,compute_75\" --use-local-env -ccbin "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.29.30133\bin\HostX86\x64" -x cu -rdc=true  -I"C:\Program Files\TensorRT-8.5.3.1\include" -I"C:\Program Files\NVIDIA Corporation\NvToolsExt\include" -I"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\include" -IC:\opencv\opencv\build\install\include -IC:\libtorch\include -IC:\libtorch\include\torch\csrc\api\include -ID:\csi4900\glow_mipmap\glow_effect\source -ID:\csi4900\glow_mipmap -I"C:\Users\lenovo\vcpkg\installed\x64-windows\include" -I"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\include" -I"C:\Users\lenovo\vcpkg\installed\x64-windows\include" -I"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\include"     --keep-dir x64\Release  -maxrregcount=0  --machine 64 --compile -cudart shared --threads 0 -g -G   -DWIN32 -DWIN64 -DNDEBUG -D_CONSOLE -D_CRT_SECURE_NO_WARNINGS -D_MBCS -Xcompiler "/EHsc /W3 /nologo /O2 /Fdx64\Release\vc142.pdb /FS   /MT " -o D:\csi4900\glow_mipmap\glow_effect\x64\Release\segmentation_kernels.cu.obj "D:\csi4900\glow_mipmap\glow_effect\source_cu\segmentation_kernels.cu" 
+  D:\csi4900\glow_mipmap\glow_effect>"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\bin\nvcc.exe" -gencode=arch=compute_75,code=\"sm_75,compute_75\" --use-local-env -ccbin "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.29.30133\bin\HostX86\x64" -x cu -rdc=true  -I"C:\Program Files\TensorRT-8.5.3.1\include" -I"C:\Program Files\NVIDIA Corporation\NvToolsExt\include" -I"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\include" -IC:\opencv\opencv\build\install\include -IC:\libtorch\include -IC:\libtorch\include\torch\csrc\api\include -ID:\csi4900\glow_mipmap\glow_effect\source -ID:\csi4900\glow_mipmap -I"C:\Users\lenovo\vcpkg\installed\x64-windows\include" -I"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\include" -I"C:\Users\lenovo\vcpkg\installed\x64-windows\include" -I"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\include"     --keep-dir x64\Release  -maxrregcount=0  --machine 64 --compile -cudart shared --threads 0 -g -G   -DWIN32 -DWIN64 -DNDEBUG -D_CONSOLE -D_CRT_SECURE_NO_WARNINGS -D_MBCS -Xcompiler "/EHsc /W3 /nologo /O2 /Fdx64\Release\vc142.pdb /FS   /MT " -o D:\csi4900\glow_mipmap\glow_effect\x64\Release\resizeWithTexture.cu.obj "D:\csi4900\glow_mipmap\glow_effect\source_cu\resizeWithTexture.cu" 
   
   D:\csi4900\glow_mipmap\glow_effect>"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\bin\nvcc.exe" -gencode=arch=compute_75,code=\"sm_75,compute_75\" --use-local-env -ccbin "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.29.30133\bin\HostX86\x64" -x cu -rdc=true  -I"C:\Program Files\TensorRT-8.5.3.1\include" -I"C:\Program Files\NVIDIA Corporation\NvToolsExt\include" -I"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\include" -IC:\opencv\opencv\build\install\include -IC:\libtorch\include -IC:\libtorch\include\torch\csrc\api\include -ID:\csi4900\glow_mipmap\glow_effect\source -ID:\csi4900\glow_mipmap -I"C:\Users\lenovo\vcpkg\installed\x64-windows\include" -I"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\include" -I"C:\Users\lenovo\vcpkg\installed\x64-windows\include" -I"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\include"     --keep-dir x64\Release  -maxrregcount=0  --machine 64 --compile -cudart shared --compiler-options "/EHsc /W3 /nologo /O2 /Fdx64\Release\vc142.pdb /MD" --threads 0 -g -G   -DWIN32 -DWIN64 -DNDEBUG -D_CONSOLE -D_CRT_SECURE_NO_WARNINGS -D_MBCS -Xcompiler "/EHsc /W3 /nologo /O2 /Fdx64\Release\vc142.pdb /FS   /MT " -o D:\csi4900\glow_mipmap\glow_effect\x64\Release\mipmap.cu.obj "D:\csi4900\glow_mipmap\glow_effect\source_cu\mipmap.cu" 
-  
-  
-  D:\csi4900\glow_mipmap\glow_effect>"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\bin\nvcc.exe" -gencode=arch=compute_75,code=\"sm_75,compute_75\" --use-local-env -ccbin "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.29.30133\bin\HostX86\x64" -x cu -rdc=true  -I"C:\Program Files\TensorRT-8.5.3.1\include" -I"C:\Program Files\NVIDIA Corporation\NvToolsExt\include" -I"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\include" -IC:\opencv\opencv\build\install\include -IC:\libtorch\include -IC:\libtorch\include\torch\csrc\api\include -ID:\csi4900\glow_mipmap\glow_effect\source -ID:\csi4900\glow_mipmap -I"C:\Users\lenovo\vcpkg\installed\x64-windows\include" -I"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\include" -I"C:\Users\lenovo\vcpkg\installed\x64-windows\include" -I"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\include"     --keep-dir x64\Release  -maxrregcount=0  --machine 64 --compile -cudart shared --threads 0 -g -G   -DWIN32 -DWIN64 -DNDEBUG -D_CONSOLE -D_CRT_SECURE_NO_WARNINGS -D_MBCS -Xcompiler "/EHsc /W3 /nologo /O2 /Fdx64\Release\vc142.pdb /FS   /MT " -o D:\csi4900\glow_mipmap\glow_effect\x64\Release\resizeWithTexture.cu.obj "D:\csi4900\glow_mipmap\glow_effect\source_cu\resizeWithTexture.cu" 
-  D:\csi4900\glow_mipmap\glow_effect>"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\bin\nvcc.exe" -gencode=arch=compute_75,code=\"sm_75,compute_75\" --use-local-env -ccbin "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.29.30133\bin\HostX86\x64" -x cu -rdc=true  -I"C:\Program Files\TensorRT-8.5.3.1\include" -I"C:\Program Files\NVIDIA Corporation\NvToolsExt\include" -I"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\include" -IC:\opencv\opencv\build\install\include -IC:\libtorch\include -IC:\libtorch\include\torch\csrc\api\include -ID:\csi4900\glow_mipmap\glow_effect\source -ID:\csi4900\glow_mipmap -I"C:\Users\lenovo\vcpkg\installed\x64-windows\include" -I"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\include" -I"C:\Users\lenovo\vcpkg\installed\x64-windows\include" -I"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\include"     --keep-dir x64\Release  -maxrregcount=0  --machine 64 --compile -cudart shared --threads 0 -g -G   -DWIN32 -DWIN64 -DNDEBUG -D_CONSOLE -D_CRT_SECURE_NO_WARNINGS -D_MBCS -Xcompiler "/EHsc /W3 /nologo /O2 /Fdx64\Release\vc142.pdb /FS   /MT " -o D:\csi4900\glow_mipmap\glow_effect\x64\Release\segmentation_kernels.cu.obj "D:\csi4900\glow_mipmap\glow_effect\source_cu\segmentation_kernels.cu" 
   segmentation_kernels.cu
-  mipmap.cu
   resizeWithTexture.cu
+  mipmap.cu
 cl : Command line warning D9025: overriding '/MD' with '/MT'
 cl : Command line warning D9025: overriding '/MD' with '/MT'
-  tmpxft_000051a8_00000000-7_segmentation_kernels.cudafe1.cpp
-  tmpxft_000053b0_00000000-7_mipmap.cudafe1.cpp
+  tmpxft_00002934_00000000-7_segmentation_kernels.cudafe1.cpp
+  tmpxft_00004934_00000000-7_mipmap.cudafe1.cpp
 cl : Command line warning D9025: overriding '/MD' with '/MT'
-  tmpxft_00003184_00000000-7_resizeWithTexture.cudafe1.cpp
+  tmpxft_00001f0c_00000000-7_resizeWithTexture.cudafe1.cpp
   all_main.cpp
 C:\libtorch\include\c10\macros\Macros.h(138,20): warning C4067: unexpected tokens following preprocessor directive - expected a newline
 C:\libtorch\include\c10\util\variant.h(1799,1): warning C4819: The file contains a character that cannot be represented in the current code page (932). Save the file in Unicode format to prevent data loss
@@ -5271,8 +5271,9 @@ D:\csi4900\glow_mipmap\glow_effect\source\glow_effect.cpp(1231,91): warning C424
 D:\csi4900\glow_mipmap\glow_effect\source\glow_effect.cpp(1289,95): warning C4244: 'argument': conversion from 'int' to 'float', possible loss of data
 D:\csi4900\glow_mipmap\glow_effect\source\glow_effect.cpp(1369,90): warning C4244: 'argument': conversion from 'int' to 'float', possible loss of data
 D:\csi4900\glow_mipmap\glow_effect\source\glow_effect.cpp(1424,94): warning C4244: 'argument': conversion from 'int' to 'float', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\glow_effect.cpp(1726,67): warning C4244: 'argument': conversion from 'int' to 'const float', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\glow_effect.cpp(1726,52): warning C4244: 'argument': conversion from 'int' to 'const float', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\glow_effect.cpp(1705,66): warning C4244: 'argument': conversion from 'int' to 'const float', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\glow_effect.cpp(1705,51): warning C4244: 'argument': conversion from 'int' to 'const float', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\glow_effect.cpp(2034,91): warning C4244: 'argument': conversion from 'int' to 'float', possible loss of data
 C:\libtorch\include\c10\util\flat_hash_map.h(171,1): warning C4624: 'ska::detailv3::sherwood_v3_entry<std::pair<K,V>>': destructor was implicitly defined as deleted
           with
           [
@@ -10939,62 +10940,66 @@ C:\libtorch\include\torch\csrc\api\include\torch\optim\lbfgs.h(49,3): warning C4
 C:\libtorch\include\torch\csrc\api\include\torch\optim\lbfgs.h(49): message : see declaration of 'c10::optional<std::vector<at::Tensor,std::allocator<at::Tensor>>>'
 C:\libtorch\include\torch\csrc\api\include\torch\optim\lbfgs.h(87,26): warning C4251: 'torch::optim::LBFGS::_numel_cache': class 'c10::optional<int64_t>' needs to have dll-interface to be used by clients of class 'torch::optim::LBFGS'
 C:\libtorch\include\c10\core\TensorImpl.h(1702): message : see declaration of 'c10::optional<int64_t>'
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(100,17): warning C4244: 'initializing': conversion from 'int64_t' to 'int', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(122,37): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(123,37): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(124,37): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(125,37): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(217,17): warning C4244: 'initializing': conversion from 'int64_t' to 'int', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(285,66): warning C4244: 'argument': conversion from 'int64_t' to 'int', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(285,39): warning C4244: 'argument': conversion from 'int64_t' to 'int', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(364,17): warning C4244: 'initializing': conversion from 'int64_t' to 'int', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(381,34): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(382,34): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(383,34): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(384,34): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(529,56): warning C4244: 'argument': conversion from 'int64_t' to 'int', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(529,34): warning C4244: 'argument': conversion from 'int64_t' to 'int', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(580,20): warning C4244: 'initializing': conversion from 'int64_t' to 'int', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(597,43): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(598,43): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(599,43): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(600,43): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(755,52): warning C4244: 'argument': conversion from 'int64_t' to 'int', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(755,35): warning C4244: 'argument': conversion from 'int64_t' to 'int', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(777,73): warning C4244: 'argument': conversion from 'int64_t' to 'int', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(777,46): warning C4244: 'argument': conversion from 'int64_t' to 'int', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(838,17): warning C4244: 'initializing': conversion from 'int64_t' to 'int', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(878,34): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(879,34): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(880,34): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(881,34): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1050,66): warning C4244: 'argument': conversion from 'int64_t' to 'int', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1050,39): warning C4244: 'argument': conversion from 'int64_t' to 'int', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1103,17): warning C4244: 'initializing': conversion from 'int64_t' to 'int', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1147,13): warning C4244: 'initializing': conversion from 'int64_t' to 'int', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1156,18): warning C4244: 'initializing': conversion from 'int64_t' to 'int', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1167,35): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1168,35): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1169,35): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1170,35): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1239,47): warning C4244: 'argument': conversion from 'int64_t' to 'int', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1239,31): warning C4244: 'argument': conversion from 'int64_t' to 'int', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1306,17): warning C4244: 'initializing': conversion from 'int64_t' to 'int', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1348,13): warning C4244: 'initializing': conversion from 'int64_t' to 'int', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1356,35): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1357,35): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1358,35): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1359,35): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1363,18): warning C4244: 'initializing': conversion from 'int64_t' to 'int', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1601,37): warning C4267: 'initializing': conversion from 'size_t' to 'int', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1668,38): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1669,38): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1670,38): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(2043,17): warning C4244: 'initializing': conversion from 'int64_t' to 'int', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(2057,34): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(2058,34): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(2059,34): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
-D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(2060,34): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(120,17): warning C4244: 'initializing': conversion from 'int64_t' to 'int', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(142,37): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(143,37): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(144,37): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(145,37): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(237,17): warning C4244: 'initializing': conversion from 'int64_t' to 'int', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(305,66): warning C4244: 'argument': conversion from 'int64_t' to 'int', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(305,39): warning C4244: 'argument': conversion from 'int64_t' to 'int', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(384,17): warning C4244: 'initializing': conversion from 'int64_t' to 'int', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(401,34): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(402,34): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(403,34): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(404,34): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(549,56): warning C4244: 'argument': conversion from 'int64_t' to 'int', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(549,34): warning C4244: 'argument': conversion from 'int64_t' to 'int', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(600,20): warning C4244: 'initializing': conversion from 'int64_t' to 'int', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(617,43): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(618,43): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(619,43): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(620,43): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(775,52): warning C4244: 'argument': conversion from 'int64_t' to 'int', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(775,35): warning C4244: 'argument': conversion from 'int64_t' to 'int', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(797,73): warning C4244: 'argument': conversion from 'int64_t' to 'int', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(797,46): warning C4244: 'argument': conversion from 'int64_t' to 'int', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(858,17): warning C4244: 'initializing': conversion from 'int64_t' to 'int', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(898,34): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(899,34): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(900,34): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(901,34): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1070,66): warning C4244: 'argument': conversion from 'int64_t' to 'int', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1070,39): warning C4244: 'argument': conversion from 'int64_t' to 'int', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1123,17): warning C4244: 'initializing': conversion from 'int64_t' to 'int', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1167,13): warning C4244: 'initializing': conversion from 'int64_t' to 'int', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1176,18): warning C4244: 'initializing': conversion from 'int64_t' to 'int', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1187,35): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1188,35): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1189,35): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1190,35): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1259,47): warning C4244: 'argument': conversion from 'int64_t' to 'int', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1259,31): warning C4244: 'argument': conversion from 'int64_t' to 'int', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1326,17): warning C4244: 'initializing': conversion from 'int64_t' to 'int', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1368,13): warning C4244: 'initializing': conversion from 'int64_t' to 'int', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1376,35): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1377,35): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1378,35): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1379,35): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1383,18): warning C4244: 'initializing': conversion from 'int64_t' to 'int', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1619,37): warning C4267: 'initializing': conversion from 'size_t' to 'int', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1686,38): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1687,38): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1688,38): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(1975,67): warning C4267: 'initializing': conversion from 'size_t' to 'int', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(2131,38): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(2132,38): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(2133,38): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(2314,17): warning C4244: 'initializing': conversion from 'int64_t' to 'int', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(2328,34): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(2329,34): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(2330,34): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
+D:\csi4900\glow_mipmap\glow_effect\source\TRTInference.cpp(2331,34): warning C4244: '=': conversion from 'int64_t' to 'int32_t', possible loss of data
 C:\libtorch\include\c10\util\flat_hash_map.h(171,1): warning C4624: 'ska::detailv3::sherwood_v3_entry<std::pair<K,V>>': destructor was implicitly defined as deleted
           with
           [
@@ -11501,7 +11506,7 @@ C:\libtorch\include\c10\util\SmallVector.h(1344): message : see reference to fun
      Creating library D:\csi4900\glow_mipmap\glow_effect\x64\Release\glow_effect.lib and object D:\csi4900\glow_mipmap\glow_effect\x64\Release\glow_effect.exp
   Generating code
   Previous IPDB not found, fall back to full compilation.
-  All 3894 functions were compiled because no usable IPDB/IOBJ from previous compilation was found.
+  All 4072 functions were compiled because no usable IPDB/IOBJ from previous compilation was found.
   Finished generating code
   glow_effect.vcxproj -> D:\csi4900\glow_mipmap\glow_effect\x64\Release\glow_effect.exe
   'pwsh.exe' is not recognized as an internal or external command,

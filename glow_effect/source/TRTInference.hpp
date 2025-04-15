@@ -45,7 +45,8 @@ public:
 	// Cleanup method to release resources
 	static void cleanupTRTEngine();
 
-	static std::vector<cv::Mat> measure_segmentation_trt_performance_single_batch_parallel_preloaded(nvinfer1::ICudaEngine* engine, const std::vector<torch::Tensor>& img_tensors, int num_streams);
+	static std::vector<cv::Mat> measure_segmentation_trt_performance_single_batch_parallel_preloaded(const std::string& trt_plan, const std::vector<torch::Tensor>& img_tensors, int num_streams);
+	static std::vector<cv::Mat> measure_segmentation_trt_performance_single_batch_parallel_preloaded_triple_buffer(nvinfer1::ICudaEngine* engine, const std::vector<torch::Tensor>& img_tensors, int num_streams);
 
 
 	/**

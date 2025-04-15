@@ -103,7 +103,7 @@ void glow_effect_video_graph(const char* video_nm, std::string planFilePath);
  * @param planFilePath Path to the single-batch TensorRT plan file
  */
 void glow_effect_video_single_batch_parallel(const char* video_nm, std::string planFilePath);
-void glow_effect_video_single_batch_parallel_optimized(const char* video_nm, std::string planFilePath);
+void glow_effect_video_single_batch_parallel_triple_buffer(const char* video_nm, std::string planFilePath);
 
 /**
  * @brief Applies a "blow" (highlight) effect based on a grayscale mask.
