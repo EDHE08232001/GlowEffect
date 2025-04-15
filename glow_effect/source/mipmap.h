@@ -1,38 +1,71 @@
-﻿#ifndef MIPMAP_H
-#define MIPMAP_H
-
-#include <cuda_runtime.h>
-#include "old_movies.cuh"  // This header should include any common CUDA error checking utilities (e.g., checkCudaErrors)
-
-/**
- * @brief Synchronously filters an image by generating mipmap levels and retrieving a blurred version.
+﻿/*******************************************************************************************************************
+ * FILE NAME   : mipmap.h
  *
- * This function creates a complete mipmap chain from the input image stored in host memory, applies a blur
- * effect via mipmapping, and retrieves the resulting image into a host output buffer. The operation is performed
- * synchronously, meaning the function does not return until all GPU operations are complete.
+ * DESCRIPTION : Header file declaring CUDA functions for mipmapping operations including 
+ *               image blurring and glow effects using GPU-accelerated texture processing.
  *
- * @param width   The width of the input image.
- * @param height  The height of the input image.
- * @param scale   The scale factor used for mipmap sampling (used to compute the uniform level-of-detail).
- * @param src_img Pointer to the input image data in host memory. The image is expected to be in RGBA format (stored as uchar4).
- * @param dst_img Pointer to the output image data in host memory where the processed image will be stored.
- */
-void filter_mipmap(const int width, const int height, const float scale, const uchar4* src_img, uchar4* dst_img);
+ * VERSION HISTORY
+ * 2022 OCT 10      Yu Liu          Initial version
+ * 2025 APR 15      Modified        Improved documentation and formatting
+ *
+ ********************************************************************************************************************/
 
-/**
- * @brief Asynchronously applies a mipmap filter to an image.
- *
- * This function performs the mipmap filtering operation asynchronously. It allocates a CUDA mipmapped array,
- * copies the source image into the array, generates the mipmap levels, and retrieves the filtered output into
- * a host buffer�all while using the provided CUDA stream. This allows overlapping data transfers with kernel execution.
- *
- * @param width   The width of the input image.
- * @param height  The height of the input image.
- * @param scale   The scale factor used for mipmap sampling (used to compute the uniform level-of-detail).
- * @param src_img Pointer to the source image data in host memory. The image is expected to be in RGBA format (stored as uchar4).
- * @param dst_img Pointer to the output image data in host memory where the processed image will be stored.
- * @param stream  The CUDA stream to use for asynchronous operations.
- */
-void filter_mipmap_async(const int width, const int height, const float scale, const uchar4* src_img, uchar4* dst_img, cudaStream_t stream);
-
-#endif // MIPMAP_H
+ #ifndef MIPMAP_H
+ #define MIPMAP_H
+ 
+ #include <cuda_runtime.h>
+ 
+ /**
+  * @brief Applies a mipmap-based blur filter to an image (synchronous version).
+  *
+  * Creates a complete mipmap chain from the input image, applies a blur effect via mipmapping,
+  * and retrieves the resulting image into the output buffer. This function blocks until
+  * all GPU operations are complete.
+  *
+  * @param width   Width of the input image in pixels.
+  * @param height  Height of the input image in pixels.
+  * @param scale   Scale factor controlling blur intensity (larger values = more blur).
+  * @param src_img Input image data in RGBA format (uchar4).
+  * @param dst_img Output buffer for the processed image (must be pre-allocated).
+  */
+ void filter_mipmap(const int width, const int height, const float scale, 
+                   const uchar4* src_img, uchar4* dst_img);
+ 
+ /**
+  * @brief Filters and blends images using mipmap-based glow effect.
+  * 
+  * Creates a mipmap chain from the mask image, uses it to compute per-pixel alpha values,
+  * then blends the base and glow images together. This produces a controllable glow effect
+  * where the mask has higher values.
+  *
+  * @param width      Width of the images in pixels.
+  * @param height     Height of the images in pixels.
+  * @param scale      Scale factor controlling blur spread of the glow.
+  * @param key_scale  Multiplier for the alpha values (boosts glow intensity).
+  * @param mask_img   Mask image determining glow regions (used to create mipmaps).
+  * @param glow_img   Glow/highlight image to blend over the base image.
+  * @param base_img   Original base image to receive the glow effect.
+  * @param output_img Output buffer for the blended result (must be pre-allocated).
+  */
+ void filter_and_blend(const int width, const int height, const float scale, const float key_scale,
+                      const uchar4* mask_img, const uchar4* glow_img, 
+                      const uchar4* base_img, uchar4* output_img);
+ 
+ /**
+  * @brief Asynchronously applies a mipmap filter to an image.
+  *
+  * Performs the same operation as filter_mipmap() but asynchronously using the provided
+  * CUDA stream. This allows overlapping data transfers with kernel execution for better
+  * performance when processing multiple images.
+  *
+  * @param width   Width of the input image in pixels.
+  * @param height  Height of the input image in pixels.
+  * @param scale   Scale factor controlling blur intensity.
+  * @param src_img Input image data in RGBA format (uchar4).
+  * @param dst_img Output buffer for the processed image (must be pre-allocated).
+  * @param stream  CUDA stream to use for asynchronous operations.
+  */
+ void filter_mipmap_async(const int width, const int height, const float scale, 
+                         const uchar4* src_img, uchar4* dst_img, cudaStream_t stream);
+ 
+ #endif // MIPMAP_H

@@ -1,7 +1,6 @@
 ﻿#ifndef GLOW_EFFECT_HPP
 #define GLOW_EFFECT_HPP
 
-
 /**
  * @file glow_effect.hpp
  * @brief Declares functions and external variables for applying glow effects using CUDA, TensorRT, and OpenCV.
@@ -11,25 +10,16 @@
  * It also declares external variables that are controlled by the GUI (wxWidgets).
  */
 
- // Required CUDA type definitions
-
+// Required CUDA type definitions
 #include <cuda_runtime.h>
 
-// Include OpenCV core module for cv::Mat and cv::Vec3b
+// OpenCV includes
 #include <opencv2/core.hpp>
 #include <opencv2/core/mat.hpp>
-
-/**
- * @brief Applies mipmapping to an image.
- *
- * @param width The width of the source image.
- * @param height The height of the source image.
- * @param scale The scale factor for mipmapping.
- * @param src_img Pointer to the source image data (uchar4 format).
- * @param dst_img Pointer to the destination image data (uchar4 format).
-
-#include <string>
 #include <opencv2/imgproc.hpp>
+
+// Standard includes
+#include <string>
 
 /**
  * External GUI-controlled variables.
@@ -51,13 +41,43 @@ extern cv::Vec3b param_KeyColor;
  */
 void filter_mipmap(const int width, const int height, const float scale, const uchar4* src_img, uchar4* dst_img);
 
-void filter_and_blend(const int width, const int height, const float scale, const float key_scale,
-    const uchar4* mask_img,   // 4-channel segmentation mask (for mipmap/alpha generation)
-    const uchar4* glow_img,   // Glow (highlighted) image
-    const uchar4* base_img,   // Original frame (base image for blending)
-    uchar4* output_img);      // Blended output image (RGBA)
+/**
+ * @brief Asynchronous version of the CUDA-based mipmapping filter.
+ *
+ * @param width    Width of the source image.
+ * @param height   Height of the source image.
+ * @param scale    Scale factor for mipmapping.
+ * @param src_img  Pointer to the source image data (uchar4).
+ * @param dst_img  Pointer to the destination image data (uchar4).
+ * @param stream   CUDA stream to use for asynchronous execution.
+ */
+void filter_mipmap_async(const int width, const int height, const float scale, const uchar4* src_img, uchar4* dst_img, cudaStream_t stream);
 
+/**
+ * @brief Applies filtering and blending operations in a single CUDA operation.
+ *
+ * @param width       Width of the source image.
+ * @param height      Height of the source image.
+ * @param scale       Scale factor for mipmapping.
+ * @param key_scale   Scaling factor for the blend operation.
+ * @param mask_img    4-channel segmentation mask (for mipmap/alpha generation).
+ * @param glow_img    Glow (highlighted) image.
+ * @param base_img    Original frame (base image for blending).
+ * @param output_img  Blended output image (RGBA).
+ */
+void filter_and_blend(const int width, const int height, const float scale, const float key_scale,
+    const uchar4* mask_img, const uchar4* glow_img, const uchar4* base_img, uchar4* output_img);
+
+/**
+ * @brief Converts a grayscale mask to an RGBA mask with specific tolerance.
+ *
+ * @param grayscale_mask Input grayscale mask.
+ * @param param_KeyLevel Target key level to match.
+ * @param tolerance      Tolerance around the key level (default 0).
+ * @return CV_8UC4 RGBA mask where pixels matching param_KeyLevel are opaque.
+ */
 cv::Mat threshold_mask_to_rgba(const cv::Mat& grayscale_mask, int param_KeyLevel, int tolerance = 0);
+
 /**
  * @brief Applies a glow effect to an image using a provided grayscale mask.
  *
@@ -69,11 +89,23 @@ void glow_effect_image(const char* image_nm, const cv::Mat& grayscale_mask);
 /**
  * @brief Applies a glow effect to a video file.
  *
+ * @param video_nm Path to the input video file.
+ */
+void glow_effect_video(const char* video_nm);
+
+/**
+ * @brief Applies a glow effect to a video file with preloaded engine optimization.
+ *
+ * @param video_nm Path to the input video file.
+ */
+void glow_effect_video_OPT(const char* video_nm);
+
+/**
+ * @brief Applies a glow effect to a video file using triple buffering.
+ *
  * @param video_nm     Path to the input video file.
  * @param planFilePath Path to the TRT plan file.
  */
-void glow_effect_video(const char* video_nm);
-void glow_effect_video_OPT(const char* video_nm);
 void glow_effect_video_triple_buffer(const char* video_nm, std::string planFilePath);
 
 /**
@@ -90,19 +122,25 @@ void glow_effect_video_triple_buffer(const char* video_nm, std::string planFileP
 void glow_effect_video_graph(const char* video_nm, std::string planFilePath);
 
 /**
- * @brief Applies a glow effect to video using parallel processing of single-batch TRT model
+ * @brief Applies a glow effect to video using parallel processing of single-batch TRT model.
  *
  * This function processes video frames in parallel using multiple streams and the
  * single-batch TensorRT model. It employs the updated TRTInference that correctly
  * handles CUDA Graph capture for post-processing operations.
  *
- * The function maintains the same glow/bloom effect pipeline but organizes the processing
- * for optimal parallel execution with proper error handling.
- *
- * @param video_nm Path to the input video file
- * @param planFilePath Path to the single-batch TensorRT plan file
+ * @param video_nm     Path to the input video file.
+ * @param planFilePath Path to the single-batch TensorRT plan file.
  */
 void glow_effect_video_single_batch_parallel(const char* video_nm, std::string planFilePath);
+
+/**
+ * @brief Applies a glow effect to video using triple buffering with single-batch TRT model.
+ *
+ * This function processes video frames in parallel with triple buffering for optimal performance.
+ *
+ * @param video_nm     Path to the input video file.
+ * @param planFilePath Path to the single-batch TensorRT plan file.
+ */
 void glow_effect_video_single_batch_parallel_triple_buffer(const char* video_nm, std::string planFilePath);
 
 /**
@@ -119,12 +157,6 @@ void glow_effect_video_single_batch_parallel_triple_buffer(const char* video_nm,
 void glow_blow(const cv::Mat& mask, cv::Mat& dst_rgba, int param_KeyLevel, int Delta);
 
 /**
- * @brief Applies mipmapping and other transformations to an image.
- *
- * @param src The source image.
- * @param dst The destination image after applying mipmapping.
- * @param scale The scale factor for mipmapping.
- * @param param_KeyLevel The key level parameter controlling the transformation.
  * @brief Applies a mipmap filtering operation on a grayscale image and outputs an RGBA image.
  *
  * Converts the input grayscale image to an RGBA image where only pixels equal to
@@ -146,11 +178,11 @@ void apply_mipmap(const cv::Mat& src, cv::Mat& dst, float scale, int param_KeyLe
  * on the provided non-blocking CUDA stream. The result is written directly into the caller-provided
  * pinned destination buffer.
  *
- * @param input_gray    The source single-channel (CV_8UC1) grayscale image.
- * @param dst_img       Pointer to the preallocated pinned host memory for the output RGBA image.
- * @param scale         The scale factor used by the mipmap filter.
+ * @param input_gray     The source single-channel (CV_8UC1) grayscale image.
+ * @param dst_img        Pointer to the preallocated pinned host memory for the output RGBA image.
+ * @param scale          The scale factor used by the mipmap filter.
  * @param param_KeyLevel Grayscale value determining which pixels become opaque.
- * @param stream        The non-blocking CUDA stream on which to perform asynchronous mipmap filtering.
+ * @param stream         The non-blocking CUDA stream on which to perform asynchronous mipmap filtering.
  */
 void apply_mipmap_async(const cv::Mat& input_gray, uchar4* dst_img, float scale, int param_KeyLevel, cudaStream_t stream);
 
